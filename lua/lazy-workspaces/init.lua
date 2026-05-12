@@ -31,6 +31,7 @@ function M._load_source(ws_source)
 
   for _, ws_name in ipairs(ws_source.enable or {}) do
     M._load_workspace(ws_name)
+    require("lazy-workspaces.injector").inject(path, ws_name)
   end
 end
 
