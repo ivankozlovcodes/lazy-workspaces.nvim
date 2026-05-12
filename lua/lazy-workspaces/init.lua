@@ -10,6 +10,9 @@ local M = {}
 
 ---@param opts LazyWorkspacesOpts
 function M.setup(opts)
+  vim.api.nvim_create_user_command("LazyWorkspacesBootstrap", function(args)
+    require("lazy-workspaces.bootstrap").command(args)
+  end, { nargs = "?", desc = "Bootstrap nvim config to lazy-workspaces format", complete = "dir" })
   opts = opts or {}
   for _, ws_source in ipairs(opts.workspaces or {}) do
     local ok, err = pcall(M._load_source, ws_source)
