@@ -30,8 +30,9 @@ require("lazy").setup({
 			opts = {
 				workspaces = {
 					{
-						url = "file://~/git/nvim.conf.d", -- can be git url
-						enable = { "common" },
+						url = "git@github.com:ivankozlovcodes/nvim.conf.d.git",
+						branch = "pluginize",
+						enable = { "common", "personal" },
 					},
 				},
 			},

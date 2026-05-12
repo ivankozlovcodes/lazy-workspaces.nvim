@@ -2,6 +2,7 @@ local M = {}
 
 ---@class WorkspaceSource
 ---@field url string        file:// path or git URL
+---@field branch string?    git branch (optional, defaults to repo default)
 ---@field enable string[]   workspace names to load
 
 ---@class LazyWorkspacesOpts
@@ -21,7 +22,7 @@ end
 ---@param ws_source WorkspaceSource
 function M._load_source(ws_source)
   local resolver = require("lazy-workspaces.resolver")
-  local path = resolver.resolve(ws_source.url)
+  local path = resolver.resolve(ws_source.url, ws_source.branch)
 
   -- Add repo root to rtp so lua/ inside it is searchable
   vim.opt.rtp:append(path)
