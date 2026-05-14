@@ -12,7 +12,7 @@ local M = {}
 function M.setup(opts)
   vim.api.nvim_create_user_command("LazyWorkspacesBootstrap", function(args)
     require("lazy-workspaces.bootstrap").command(args)
-  end, { nargs = "?", desc = "Bootstrap nvim config to lazy-workspaces format", complete = "dir" })
+  end, { nargs = "*", desc = "Bootstrap nvim config to lazy-workspaces format", complete = "dir" })
   opts = opts or {}
   for _, ws_source in ipairs(opts.workspaces or {}) do
     local ok, err = pcall(M._load_source, ws_source)
@@ -20,6 +20,24 @@ function M.setup(opts)
       vim.notify("[lazy-workspaces] " .. tostring(err), vim.log.levels.ERROR)
     end
   end
+
+  -- Install missing plugins after startup completes.
+  -- Deferred so Loader.startup() finishes before install triggers —
+  -- avoids Plugin.load() resetting Config.plugins and wiping injected specs.
+  vim.schedule(function()
+    local Config = require("lazy.core.config")
+    if not Config.options.install.missing then return end
+    local missing = false
+    for _, plugin in pairs(Config.plugins) do
+      if not plugin._.installed then
+        missing = true
+        break
+      end
+    end
+    if missing then
+      require("lazy.manage").install({ wait = false })
+    end
+  end)
 end
 
 ---@param ws_source WorkspaceSource
@@ -34,8 +52,8 @@ function M._load_source(ws_source)
     .. ";" .. path .. "/lua/?/init.lua"
 
   for _, ws_name in ipairs(ws_source.enable or {}) do
-    M._load_workspace(ws_name)
     require("lazy-workspaces.injector").inject(path, ws_name)
+    M._load_workspace(ws_name)
   end
 end
 

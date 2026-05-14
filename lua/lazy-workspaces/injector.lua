@@ -34,23 +34,28 @@ function M.inject(ws_path, ws_name)
   local Loader = require("lazy.core.loader")
   local Handler = require("lazy.core.handler")
 
-  -- 2. Parse specs into Config.spec (adds to meta, resolves fragments)
+  -- 2. Persist specs into Config.options.spec so Plugin.load() rebuilds
+  --    (triggered by :Lazy sync / :Lazy clean) include workspace plugins.
+  if type(Config.options.spec) == "table" then
+    for _, spec in ipairs(specs) do
+      table.insert(Config.options.spec, spec)
+    end
+  end
+
+  -- 3. Parse specs into Config.spec (adds to meta, resolves fragments)
   Config.spec:parse(specs)
 
-  -- 3. Sync any new plugins into Config.plugins
+  -- 4. Sync any new plugins into Config.plugins
   for name, plugin in pairs(Config.spec.plugins) do
     if not Config.plugins[name] then
       Config.plugins[name] = plugin
     end
   end
 
-  -- 4. Update install state so _.installed is set
+  -- 5. Update install state so _.installed is set
   Plugin.update_state()
 
-  -- TODO: figure out how to call lazy install on newly injected plugins
-  -- (plugins not yet cloned won't load; user must run :Lazy install manually)
-
-  -- 5. Activate: load start plugins immediately, register handlers for lazy ones
+  -- 6. Activate: load start plugins immediately, register handlers for lazy ones
   for _, plugin in pairs(Config.plugins) do
     if not plugin._.loaded then
       if plugin.lazy == false then
