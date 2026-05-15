@@ -51,6 +51,22 @@ local function transform_ns_init(ns_dir, ns)
   return "wrapped"
 end
 
+local function disable_lazy_bootstrap_files(ns_dir)
+  local moved = {}
+  for _, path in ipairs(vim.fn.glob(ns_dir .. "/*.lua", false, true)) do
+    local lines = vim.fn.readfile(path)
+    for _, line in ipairs(lines) do
+      if line:match('require%(["\']lazy["\']%)%.setup') then
+        local bak = path .. ".bak"
+        vim.fn.rename(path, bak)
+        moved[#moved + 1] = vim.fn.fnamemodify(path, ":t") .. " → " .. vim.fn.fnamemodify(bak, ":t")
+        break
+      end
+    end
+  end
+  return moved
+end
+
 local function rename_plugin_dir(ns_dir)
   local lazy_dir = ns_dir .. "/lazy"
   local plugins_dir = ns_dir .. "/plugins"
@@ -170,7 +186,9 @@ function M.command(args)
     local ns_dir = lua_dir .. "/" .. ns
     local plugin_res = rename_plugin_dir(ns_dir)
     local init_res = transform_ns_init(ns_dir, ns)
-    results[#results + 1] = ns .. ": plugins(" .. plugin_res .. "), init(" .. init_res .. ")"
+    local moved = disable_lazy_bootstrap_files(ns_dir)
+    local moved_res = #moved > 0 and ("moved: " .. table.concat(moved, ", ")) or "no lazy bootstrap files"
+    results[#results + 1] = ns .. ": plugins(" .. plugin_res .. "), init(" .. init_res .. "), " .. moved_res
   end
 
   write_root_init(out_dir, namespaces)
