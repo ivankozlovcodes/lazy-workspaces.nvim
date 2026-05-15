@@ -119,7 +119,7 @@ local function write_root_init(out_dir, namespaces)
     'require("lazy").setup({',
     "  spec = {",
     "    {",
-    '      "ivankozlov/lazy-workspaces.nvim",',
+    '      "ivankozlovcodes/lazy-workspaces.nvim",',
     "      lazy = false,",
     "      priority = 1000,",
     "      opts = {",

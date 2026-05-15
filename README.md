@@ -12,7 +12,7 @@ Useful when you maintain one config repo shared across contexts (personal, work,
 
 ```lua
 {
-  "ivankozlov/lazy-workspaces.nvim",
+  "ivankozlovcodes/lazy-workspaces.nvim",
   lazy = false,
   priority = 1000,
   opts = { workspaces = {} },
@@ -42,7 +42,7 @@ nvim -u /tmp/migrated-nvim/init.lua
 Scaffold a minimal working skeleton:
 
 ```bash
-bash <(curl -s https://raw.githubusercontent.com/ivankozlov/lazy-workspaces.nvim/main/scripts/new-config.sh)
+bash <(curl -s https://raw.githubusercontent.com/ivankozlovcodes/lazy-workspaces.nvim/main/scripts/new-config.sh)
 ```
 
 Then open the scaffolded config:
