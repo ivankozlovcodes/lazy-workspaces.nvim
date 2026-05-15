@@ -8,18 +8,17 @@ Useful when you maintain one config repo shared across contexts (personal, work,
 
 ### Main path — existing Neovim config
 
-**1.** Add `lazy-workspaces` to your lazy.nvim spec:
+**1.** Scaffold a minimal config with `lazy-workspaces` already wired up:
 
-```lua
-{
-  "ivankozlovcodes/lazy-workspaces.nvim",
-  lazy = false,
-  priority = 1000,
-  opts = { workspaces = {} },
-}
+```bash
+bash <(curl -s https://raw.githubusercontent.com/ivankozlovcodes/lazy-workspaces.nvim/main/scripts/new-config.sh)
 ```
 
-**2.** Open Neovim. Run the migrate command, pointing at your current config and an output directory:
+**2.** Open the scaffolded config and run the migrate command, pointing at your existing config:
+
+```bash
+nvim -u /tmp/lazy-workspaces.conf.d/init.lua
+```
 
 ```vim
 :LazyWorkspacesBootstrap ~/.config/nvim /tmp/migrated-nvim
@@ -39,19 +38,9 @@ nvim -u /tmp/migrated-nvim/init.lua
 
 ### Side path — no Neovim config yet
 
-Scaffold a minimal working skeleton:
+The scaffold from step 1 above is already a working base. Add your workspaces to the `collect()` call in `init.lua` and start building.
 
-```bash
-bash <(curl -s https://raw.githubusercontent.com/ivankozlovcodes/lazy-workspaces.nvim/main/scripts/new-config.sh)
-```
-
-Then open the scaffolded config:
-
-```bash
-nvim -u /tmp/lazy-workspaces.conf.d/init.lua
-```
-
-`lazy-workspaces` is loaded — run `:LazyWorkspacesBootstrap` from there to migrate any existing workspace repo into the right structure.
+---
 
 ## Requirements
 
@@ -108,29 +97,67 @@ return {
 
 ## Configuration
 
+`init.lua` bootstraps both lazy.nvim and lazy-workspaces, then calls `collect()` to build the plugin spec before passing it to `lazy.setup()`:
+
 ```lua
-opts = {
-  workspaces = {
-    {
-      url    = "file://~/git/nvim.conf.d",  -- repo containing your lua/ workspaces
-      branch = "main",                       -- optional, git only
-      enable = { "common", "personal" },    -- workspace names to load
+vim.g.mapleader = " "
+vim.g.maplocalleader = " "
+
+-- Bootstrap lazy.nvim
+local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
+if not (vim.uv or vim.loop).fs_stat(lazypath) then
+  vim.fn.system({
+    "git", "clone", "--filter=blob:none", "--branch=stable",
+    "https://github.com/folke/lazy.nvim.git", lazypath,
+  })
+end
+vim.opt.rtp:prepend(lazypath)
+
+-- Bootstrap lazy-workspaces
+local lwpath = vim.fn.stdpath("data") .. "/lazy/lazy-workspaces.nvim"
+if not (vim.uv or vim.loop).fs_stat(lwpath) then
+  vim.fn.system({
+    "git", "clone", "--filter=blob:none",
+    "https://github.com/ivankozlovcodes/lazy-workspaces.nvim.git", lwpath,
+  })
+end
+vim.opt.rtp:prepend(lwpath)
+
+local workspace_specs = {}
+if (vim.uv or vim.loop).fs_stat(lwpath) then
+  workspace_specs = require("lazy-workspaces").collect({
+    workspaces = {
+      {
+        url    = "file://~/git/nvim.conf.d",
+        enable = { "common", "personal" },
+      },
+      {
+        url    = "git@github.com:user/work-nvim.git",
+        branch = "stable",
+        enable = { "work" },
+      },
     },
-    {
-      url    = "git@github.com:user/work-nvim.git",
-      branch = "stable",
-      enable = { "work" },
-    },
-  },
-}
+  })
+end
+
+require("lazy").setup({
+  spec = vim.list_extend(workspace_specs, {
+    { "ivankozlovcodes/lazy-workspaces.nvim", lazy = false, opts = {} },
+  }),
+  change_detection = { notify = false },
+})
 ```
+
+`collect()` resolves each workspace source, scans `plugins/*.lua` files, and returns a flat list of lazy.nvim specs. Workspace `M.setup()` calls (options, keymaps, autocmds) are scheduled to run after lazy's startup completes.
 
 **URL schemes supported:**
 
 | Scheme | Behavior |
 |---|---|
 | `file://~/path` | Load from local directory |
-| `https://` / `git@` | Clone on first start; async pull on subsequent starts |
+| `https://` / `git@` | Clone on first start; pull on subsequent starts |
+
+**Offline / first-run fallback:** if the lazy-workspaces clone fails (no internet), `workspace_specs` stays empty and lazy installs it on the next run when the network is available.
 
 ## Bootstrap
 
@@ -160,16 +187,15 @@ nvim -u /tmp/migrated-nvim/init.lua
 - Detects workspaces (each `lua/<name>/` folder with `init.lua`)
 - Renames `lazy/` → `plugins/` inside each workspace
 - Wraps `init.lua` body in `M.setup()`
+- Moves any existing lazy bootstrap file (e.g. `lazy_init.lua`) to `*.bak`
 - Generates a new root `init.lua` wired to `lazy-workspaces`
 
 ## How It Works
 
-1. `lazy-workspaces` loads with `lazy = false` during Neovim startup
-2. For each workspace source, resolves the URL to a local path and adds it to `runtimepath`
-3. Calls `require("<workspace>").setup()` for each enabled workspace (options, keymaps, autocmds)
-4. Scans `<workspace>/plugins/*.lua`, loads each spec file, and injects them into the live lazy.nvim registry
-
-Plugin injection happens after lazy's spec-processing phase using lazy's internal APIs — no separate `{ import = "..." }` entries needed in your `init.lua`. Workspace specs are also patched into `Config.options.spec` so `:Lazy sync` and `:Lazy clean` include them correctly.
+1. `init.lua` bootstraps lazy-workspaces from `stdpath("data")/lazy/` (cloning if needed)
+2. `collect()` resolves workspace sources, adds them to `runtimepath`, and scans each `plugins/` directory for lazy.nvim specs
+3. The returned spec list is passed directly to `lazy.setup()` — lazy handles installation, updates, and key/event/command triggers natively
+4. After lazy's startup completes, `M.setup()` is called for each workspace (options, keymaps, autocmds)
 
 ## Roadmap
 
