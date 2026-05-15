@@ -51,10 +51,16 @@ function M._load_source(ws_source)
     .. ";" .. path .. "/lua/?.lua"
     .. ";" .. path .. "/lua/?/init.lua"
 
+  local to_load = {}
   for _, ws_name in ipairs(ws_source.enable or {}) do
     require("lazy-workspaces.injector").inject(path, ws_name)
-    M._load_workspace(ws_name)
+    to_load[#to_load + 1] = ws_name
   end
+  vim.schedule(function()
+    for _, ws_name in ipairs(to_load) do
+      M._load_workspace(ws_name)
+    end
+  end)
 end
 
 ---@param ws_name string  e.g. "common"
@@ -65,7 +71,10 @@ function M._load_workspace(ws_name)
     return
   end
   if type(mod) == "table" and type(mod.setup) == "function" then
-    mod.setup()
+    local ok2, err = pcall(mod.setup)
+    if not ok2 then
+      vim.notify("[lazy-workspaces] workspace '" .. ws_name .. "' setup() error: " .. tostring(err), vim.log.levels.ERROR)
+    end
   end
 end
 
