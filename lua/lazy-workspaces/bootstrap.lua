@@ -150,10 +150,10 @@ function M.command(args)
 
   if #parts == 0 then
     src_dir = vim.fn.stdpath("config")
-    out_dir = "/tmp/lazy-workspaces.conf.d"
+    out_dir = "/tmp/nvim"
   elseif #parts == 1 then
     src_dir = vim.fn.expand(parts[1])
-    out_dir = "/tmp/lazy-workspaces.conf.d"
+    out_dir = "/tmp/nvim"
   else
     src_dir = vim.fn.expand(parts[1])
     out_dir = vim.fn.expand(parts[2])
@@ -164,6 +164,15 @@ function M.command(args)
 
   if vim.fn.isdirectory(src_dir) == 0 then
     vim.notify("[lazy-workspaces] src not found: " .. src_dir, vim.log.levels.ERROR)
+    return
+  end
+
+  local confirm = vim.fn.confirm(
+    string.format("lazy-workspaces bootstrap\n\n  src: %s\n  out: %s\n\nCopy src → out and rewrite files. Proceed?", src_dir, out_dir),
+    "&Yes\n&No", 2
+  )
+  if confirm ~= 1 then
+    vim.notify("[lazy-workspaces] bootstrap cancelled", vim.log.levels.INFO)
     return
   end
 

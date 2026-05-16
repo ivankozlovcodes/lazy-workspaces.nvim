@@ -2,12 +2,12 @@
 # new-config.sh: scaffold a minimal Neovim config with lazy-workspaces.
 #
 # Usage:
-#   bash <(curl -s https://raw.githubusercontent.com/ivankozlovcodes/lazy-workspaces.nvim/main/scripts/new-config.sh)
+#   curl -s https://raw.githubusercontent.com/ivankozlovcodes/lazy-workspaces.nvim/main/scripts/new-config.sh | bash
 #   bash new-config.sh [out_dir]
 
 set -euo pipefail
 
-OUT_DIR="${1:-/tmp/lazy-workspaces.conf.d}"
+OUT_DIR="${1:-/tmp/nvim}"
 mkdir -p "$OUT_DIR"
 
 cat > "$OUT_DIR/init.lua" <<'EOF'
