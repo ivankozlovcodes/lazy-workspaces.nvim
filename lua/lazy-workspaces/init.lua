@@ -26,7 +26,7 @@ function M.collect(opts)
 			)
 		else
 			if not vim.tbl_contains(vim.opt.rtp:get(), path) then
-				vim.opt.rtp:append(path)
+				vim.opt.rtp:prepend(path)
 			end
 			package.path = package.path .. ";" .. path .. "/lua/?.lua" .. ";" .. path .. "/lua/?/init.lua"
 
