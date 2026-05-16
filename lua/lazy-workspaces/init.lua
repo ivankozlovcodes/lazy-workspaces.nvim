@@ -22,7 +22,9 @@ function M.collect(opts)
     if not ok then
       vim.notify("[lazy-workspaces] could not resolve " .. tostring(ws_source.url) .. ": " .. tostring(path), vim.log.levels.ERROR)
     else
-      vim.opt.rtp:append(path)
+      if not vim.tbl_contains(vim.opt.rtp:get(), path) then
+        vim.opt.rtp:append(path)
+      end
       package.path = package.path
         .. ";" .. path .. "/lua/?.lua"
         .. ";" .. path .. "/lua/?/init.lua"
