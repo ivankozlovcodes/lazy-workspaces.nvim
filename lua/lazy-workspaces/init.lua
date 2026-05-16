@@ -8,74 +8,68 @@ local M = {}
 ---@class LazyWorkspacesOpts
 ---@field workspaces WorkspaceSource[]
 
+--- Resolve workspace sources, scan plugin specs, schedule workspace setup() calls.
+--- Returns a flat list of lazy.nvim specs to pass to lazy.setup({ spec = ... }).
 ---@param opts LazyWorkspacesOpts
-function M.setup(opts)
+---@return table
+function M.collect(opts)
+  opts = opts or {}
+  local resolver = require("lazy-workspaces.resolver")
+  local specs = {}
+
+  for _, ws_source in ipairs(opts.workspaces or {}) do
+    local ok, path = pcall(resolver.resolve, ws_source.url, ws_source.branch)
+    if not ok then
+      vim.notify("[lazy-workspaces] could not resolve " .. tostring(ws_source.url) .. ": " .. tostring(path), vim.log.levels.ERROR)
+    else
+      if not vim.tbl_contains(vim.opt.rtp:get(), path) then
+        vim.opt.rtp:append(path)
+      end
+      package.path = package.path
+        .. ";" .. path .. "/lua/?.lua"
+        .. ";" .. path .. "/lua/?/init.lua"
+
+      for _, ws_name in ipairs(ws_source.enable or {}) do
+        local plugins_dir = path .. "/lua/" .. ws_name .. "/plugins"
+        if vim.fn.isdirectory(plugins_dir) == 1 then
+          for _, file in ipairs(vim.fn.glob(plugins_dir .. "/*.lua", false, true)) do
+            local chunk, err = loadfile(file)
+            if not chunk then
+              vim.notify("[lazy-workspaces] failed to load spec " .. file .. ": " .. tostring(err), vim.log.levels.WARN)
+            else
+              local ok2, spec = pcall(chunk)
+              if ok2 and type(spec) == "table" then
+                specs[#specs + 1] = spec
+              end
+            end
+          end
+        end
+
+        vim.schedule(function()
+          local ok3, mod = pcall(require, ws_name)
+          if not ok3 then
+            vim.notify("[lazy-workspaces] failed to load workspace '" .. ws_name .. "': " .. tostring(mod), vim.log.levels.WARN)
+            return
+          end
+          if type(mod) == "table" and type(mod.setup) == "function" then
+            local ok4, err = pcall(mod.setup)
+            if not ok4 then
+              vim.notify("[lazy-workspaces] workspace '" .. ws_name .. "' setup() error: " .. tostring(err), vim.log.levels.ERROR)
+            end
+          end
+        end)
+      end
+    end
+  end
+
+  return specs
+end
+
+--- Called by lazy.nvim when the plugin is loaded. Registers the bootstrap command.
+function M.setup()
   vim.api.nvim_create_user_command("LazyWorkspacesBootstrap", function(args)
     require("lazy-workspaces.bootstrap").command(args)
   end, { nargs = "*", desc = "Bootstrap nvim config to lazy-workspaces format", complete = "dir" })
-  opts = opts or {}
-  for _, ws_source in ipairs(opts.workspaces or {}) do
-    local ok, err = pcall(M._load_source, ws_source)
-    if not ok then
-      vim.notify("[lazy-workspaces] " .. tostring(err), vim.log.levels.ERROR)
-    end
-  end
-
-  -- Install missing plugins after startup completes.
-  -- Deferred so Loader.startup() finishes before install triggers —
-  -- avoids Plugin.load() resetting Config.plugins and wiping injected specs.
-  vim.schedule(function()
-    local Config = require("lazy.core.config")
-    if not Config.options.install.missing then return end
-    local missing = false
-    for _, plugin in pairs(Config.plugins) do
-      if not plugin._.installed then
-        missing = true
-        break
-      end
-    end
-    if missing then
-      require("lazy.manage").install({ wait = false })
-    end
-  end)
-end
-
----@param ws_source WorkspaceSource
-function M._load_source(ws_source)
-  local resolver = require("lazy-workspaces.resolver")
-  local path = resolver.resolve(ws_source.url, ws_source.branch)
-
-  -- Add repo root to rtp so lua/ inside it is searchable
-  vim.opt.rtp:append(path)
-  package.path = package.path
-    .. ";" .. path .. "/lua/?.lua"
-    .. ";" .. path .. "/lua/?/init.lua"
-
-  local to_load = {}
-  for _, ws_name in ipairs(ws_source.enable or {}) do
-    require("lazy-workspaces.injector").inject(path, ws_name)
-    to_load[#to_load + 1] = ws_name
-  end
-  vim.schedule(function()
-    for _, ws_name in ipairs(to_load) do
-      M._load_workspace(ws_name)
-    end
-  end)
-end
-
----@param ws_name string  e.g. "common"
-function M._load_workspace(ws_name)
-  local ok, mod = pcall(require, ws_name)
-  if not ok then
-    vim.notify("[lazy-workspaces] failed to load workspace '" .. ws_name .. "': " .. tostring(mod), vim.log.levels.WARN)
-    return
-  end
-  if type(mod) == "table" and type(mod.setup) == "function" then
-    local ok2, err = pcall(mod.setup)
-    if not ok2 then
-      vim.notify("[lazy-workspaces] workspace '" .. ws_name .. "' setup() error: " .. tostring(err), vim.log.levels.ERROR)
-    end
-  end
 end
 
 return M
