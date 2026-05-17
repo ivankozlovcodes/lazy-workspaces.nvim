@@ -215,6 +215,12 @@ What `:LazyWorkspacesBootstrap` does to your config:
 
 ---
 
+## Known Limitations
+
+- **Symlinks in workspace directories are not supported.** Bootstrap's namespace detection descends into subdirectories recursively. A symlink that creates a cycle (e.g. `lua/foo/bar → lua/foo`) will cause an infinite loop. Do not use symlinks inside your `lua/` directory.
+
+---
+
 ## Roadmap
 
 - [ ] `:WorkspaceEnable` / `:WorkspaceDisable` / `:WorkspaceRefresh` commands

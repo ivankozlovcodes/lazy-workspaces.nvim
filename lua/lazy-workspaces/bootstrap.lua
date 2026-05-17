@@ -2,14 +2,40 @@ local M = {}
 
 -- TODO: show before/after diff in a float before writing
 
-local function detect_namespaces(lua_dir)
+local function detect_namespaces(lua_dir, prefix)
+  prefix = prefix or ""
   local namespaces = {}
-  for _, path in ipairs(vim.fn.glob(lua_dir .. "/*/init.lua", false, true)) do
-    local ns = path:match("/([^/]+)/init%.lua$")
-    if ns then
-      namespaces[#namespaces + 1] = ns
+
+  for _, dir in ipairs(vim.fn.glob(lua_dir .. "/*/", false, true)) do
+    local name = dir:match("/([^/]+)/$")
+    if not name then goto continue end
+
+    local full_name = prefix == "" and name or (prefix .. "." .. name)
+
+    if vim.fn.filereadable(dir .. "init.lua") == 1 then
+      namespaces[#namespaces + 1] = full_name
+    else
+      local children = detect_namespaces(dir, full_name)
+      if #children > 0 then
+        local loose = vim.fn.glob(dir .. "*.lua", false, true)
+        if #loose > 0 then
+          local names = {}
+          for _, f in ipairs(loose) do
+            names[#names + 1] = vim.fn.fnamemodify(f, ":t")
+          end
+          vim.notify(
+            "[lazy-workspaces] container '" .. full_name .. "' has loose files (not loaded as workspaces): "
+              .. table.concat(names, ", "),
+            vim.log.levels.WARN
+          )
+        end
+        vim.list_extend(namespaces, children)
+      end
     end
+
+    ::continue::
   end
+
   return namespaces
 end
 
@@ -202,7 +228,7 @@ function M.command(args)
 
   local results = {}
   for _, ns in ipairs(namespaces) do
-    local ns_dir = lua_dir .. "/" .. ns
+    local ns_dir = lua_dir .. "/" .. ns:gsub("%.", "/")
     local plugin_res = rename_plugin_dir(ns_dir)
     local init_res = transform_ns_init(ns_dir, ns)
     local moved = disable_lazy_bootstrap_files(ns_dir)
