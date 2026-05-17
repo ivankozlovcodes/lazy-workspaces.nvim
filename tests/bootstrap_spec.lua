@@ -236,6 +236,193 @@ describe("fixture: nested namespaces", function()
 	end)
 end)
 
+-- ── fixture: flat config (plugins/ + config/) ────────────────────────────────
+-- No namespace init.lua anywhere — detect_namespaces returns empty.
+-- Bootstrap falls back to flat migration: plugins/ + config/ become workspaces.
+
+describe("fixture: flat config", function()
+	local src, out
+
+	before_each(function()
+		src = H.make_tree({
+			["init.lua"]                    = 'require("lazy").setup({})',
+			["lua/plugins/whichkey.lua"]    = 'return { "folke/which-key.nvim" }',
+			["lua/plugins/treesitter.lua"]  = 'return { "nvim-treesitter/nvim-treesitter" }',
+			["lua/config/options.lua"]      = "vim.opt.number = true",
+			["lua/config/keymaps.lua"]      = "vim.keymap.set('n', 'q', '<cmd>q<cr>')",
+		})
+		out = vim.fn.tempname()
+		vim.fn.mkdir(out, "p")
+		run_bootstrap(src, out)
+	end)
+
+	after_each(function()
+		H.cleanup(src)
+		H.cleanup(out)
+	end)
+
+	describe("plugins workspace", function()
+		it("moves specs into plugins/plugins/", function()
+			assert.is_true(H.file_exists(out .. "/lua/plugins/plugins/whichkey.lua"))
+			assert.is_true(H.file_exists(out .. "/lua/plugins/plugins/treesitter.lua"))
+		end)
+
+		it("removes specs from plugins/ root", function()
+			assert.is_false(H.file_exists(out .. "/lua/plugins/whichkey.lua"))
+			assert.is_false(H.file_exists(out .. "/lua/plugins/treesitter.lua"))
+		end)
+
+		it("generates plugins/init.lua", function()
+			assert.is_true(H.file_exists(out .. "/lua/plugins/init.lua"))
+		end)
+
+		it("plugins/init.lua has empty M.setup()", function()
+			assert.is_true(H.content_has(out .. "/lua/plugins/init.lua", "function M%.setup"))
+		end)
+	end)
+
+	describe("config workspace", function()
+		it("generates config/init.lua", function()
+			assert.is_true(H.file_exists(out .. "/lua/config/init.lua"))
+		end)
+
+		it("config/init.lua requires each config file", function()
+			assert.is_true(H.content_has(out .. "/lua/config/init.lua", 'require%("config%.options"%)'))
+			assert.is_true(H.content_has(out .. "/lua/config/init.lua", 'require%("config%.keymaps"%)'))
+		end)
+
+		it("config/init.lua wraps in M.setup()", function()
+			assert.is_true(H.content_has(out .. "/lua/config/init.lua", "function M%.setup"))
+			assert.is_true(H.content_has(out .. "/lua/config/init.lua", "^return M$"))
+		end)
+
+		it("leaves config files in place", function()
+			assert.is_true(H.file_exists(out .. "/lua/config/options.lua"))
+			assert.is_true(H.file_exists(out .. "/lua/config/keymaps.lua"))
+		end)
+	end)
+
+	describe("root init.lua", function()
+		it("backs up original init.lua", function()
+			assert.is_true(H.file_exists(out .. "/init.lua.bak"))
+		end)
+
+		it("generates new root init.lua", function()
+			assert.is_true(H.file_exists(out .. "/init.lua"))
+		end)
+
+		it("includes config in enable list", function()
+			assert.is_true(H.content_has(out .. "/init.lua", '"config"'))
+		end)
+
+		it("includes plugins in enable list", function()
+			assert.is_true(H.content_has(out .. "/init.lua", '"plugins"'))
+		end)
+
+		it("new init.lua does not call lazy.setup directly", function()
+			assert.is_true(H.content_lacks(out .. "/init.lua.bak", "lazy%-workspaces"))
+		end)
+	end)
+end)
+
+-- ── unit: migrate_flat_plugins ────────────────────────────────────────────────
+
+describe("migrate_flat_plugins", function()
+	local migrate = bootstrap._test.migrate_flat_plugins
+
+	it("moves spec files into plugins/plugins/", function()
+		local src = H.make_tree({ ["lua/plugins/foo.lua"] = 'return { "foo/bar" }' })
+		local notify_stub = stub(vim, "notify")
+		migrate(src .. "/lua")
+		notify_stub:revert()
+		assert.is_true(H.file_exists(src .. "/lua/plugins/plugins/foo.lua"))
+		assert.is_false(H.file_exists(src .. "/lua/plugins/foo.lua"))
+		H.cleanup(src)
+	end)
+
+	it("generates empty plugins/init.lua", function()
+		local src = H.make_tree({ ["lua/plugins/foo.lua"] = 'return { "foo/bar" }' })
+		local notify_stub = stub(vim, "notify")
+		migrate(src .. "/lua")
+		notify_stub:revert()
+		assert.is_true(H.file_exists(src .. "/lua/plugins/init.lua"))
+		assert.is_true(H.content_has(src .. "/lua/plugins/init.lua", "function M%.setup"))
+		H.cleanup(src)
+	end)
+
+	it("skips init.lua generation when already exists, emits WARN", function()
+		local src = H.make_tree({
+			["lua/plugins/init.lua"] = "-- existing",
+			["lua/plugins/foo.lua"]  = 'return { "foo/bar" }',
+		})
+		local warned = false
+		local orig = vim.notify
+		vim.notify = function(msg, level)
+			if level == vim.log.levels.WARN and msg:match("already exists") then warned = true end
+		end
+		migrate(src .. "/lua")
+		vim.notify = orig
+		assert.is_true(warned)
+		assert.is_true(H.content_has(src .. "/lua/plugins/init.lua", "-- existing"))
+		H.cleanup(src)
+	end)
+
+	it("does not move existing init.lua into plugins/plugins/", function()
+		local src = H.make_tree({
+			["lua/plugins/init.lua"] = "-- existing",
+			["lua/plugins/foo.lua"]  = 'return { "foo/bar" }',
+		})
+		local orig = vim.notify
+		vim.notify = function() end
+		migrate(src .. "/lua")
+		vim.notify = orig
+		assert.is_false(H.file_exists(src .. "/lua/plugins/plugins/init.lua"))
+		H.cleanup(src)
+	end)
+end)
+
+-- ── unit: write_config_init ───────────────────────────────────────────────────
+
+describe("write_config_init", function()
+	local write_ci = bootstrap._test.write_config_init
+
+	it("generates init.lua requiring each .lua file", function()
+		local src = H.make_tree({
+			["lua/config/options.lua"] = "vim.opt.number = true",
+			["lua/config/keymaps.lua"] = "-- keymaps",
+		})
+		write_ci(src .. "/lua/config")
+		assert.is_true(H.content_has(src .. "/lua/config/init.lua", 'require%("config%.options"%)'))
+		assert.is_true(H.content_has(src .. "/lua/config/init.lua", 'require%("config%.keymaps"%)'))
+		H.cleanup(src)
+	end)
+
+	it("wraps requires in M.setup() with return M", function()
+		local src = H.make_tree({ ["lua/config/opts.lua"] = "-- opts" })
+		write_ci(src .. "/lua/config")
+		assert.is_true(H.content_has(src .. "/lua/config/init.lua", "function M%.setup"))
+		assert.is_true(H.content_has(src .. "/lua/config/init.lua", "^return M$"))
+		H.cleanup(src)
+	end)
+
+	it("skips generation when init.lua already exists, emits WARN", function()
+		local src = H.make_tree({
+			["lua/config/init.lua"]    = "-- existing",
+			["lua/config/options.lua"] = "-- opts",
+		})
+		local warned = false
+		local orig = vim.notify
+		vim.notify = function(msg, level)
+			if level == vim.log.levels.WARN and msg:match("already exists") then warned = true end
+		end
+		write_ci(src .. "/lua/config")
+		vim.notify = orig
+		assert.is_true(warned)
+		assert.is_true(H.content_has(src .. "/lua/config/init.lua", "-- existing"))
+		H.cleanup(src)
+	end)
+end)
+
 -- ── unit: detect_namespaces ───────────────────────────────────────────────────
 
 describe("detect_namespaces", function()

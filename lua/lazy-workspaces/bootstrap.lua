@@ -77,6 +77,59 @@ local function transform_ns_init(ns_dir, ns)
   return "wrapped"
 end
 
+local function migrate_flat_plugins(lua_dir)
+  local plugins_dir = lua_dir .. "/plugins"
+  local specs_dir   = plugins_dir .. "/plugins"
+  local init_path   = plugins_dir .. "/init.lua"
+  local init_exists = vim.fn.filereadable(init_path) == 1
+
+  vim.fn.mkdir(specs_dir, "p")
+  local moved = {}
+  for _, path in ipairs(vim.fn.glob(plugins_dir .. "/*.lua", false, true)) do
+    local fname = vim.fn.fnamemodify(path, ":t")
+    if fname ~= "init.lua" then
+      vim.fn.rename(path, specs_dir .. "/" .. fname)
+      moved[#moved + 1] = fname
+    end
+  end
+
+  if init_exists then
+    vim.notify("[lazy-workspaces] lua/plugins/init.lua already exists, skipping generation", vim.log.levels.WARN)
+  else
+    vim.fn.writefile({ "local M = {}", "", "function M.setup() end", "", "return M" }, init_path)
+  end
+
+  if #moved > 0 then
+    vim.notify(
+      "[lazy-workspaces] lua/plugins/*.lua moved to lua/plugins/plugins/. "
+        .. 'If any spec file required another by name, update to require("plugins.plugins.X").',
+      vim.log.levels.WARN
+    )
+  end
+
+  return moved
+end
+
+local function write_config_init(config_dir)
+  local init_path = config_dir .. "/init.lua"
+  if vim.fn.filereadable(init_path) == 1 then
+    vim.notify("[lazy-workspaces] lua/config/init.lua already exists, skipping generation", vim.log.levels.WARN)
+    return "skipped"
+  end
+
+  local requires = {}
+  for _, f in ipairs(vim.fn.glob(config_dir .. "/*.lua", false, true)) do
+    local stem = vim.fn.fnamemodify(f, ":t:r")
+    requires[#requires + 1] = '  require("config.' .. stem .. '")'
+  end
+
+  local lines = { "local M = {}", "", "function M.setup()" }
+  vim.list_extend(lines, requires)
+  vim.list_extend(lines, { "end", "", "return M" })
+  vim.fn.writefile(lines, init_path)
+  return "written"
+end
+
 local function disable_lazy_bootstrap_files(ns_dir)
   local moved = {}
   for _, path in ipairs(vim.fn.glob(ns_dir .. "/*.lua", false, true)) do
@@ -221,19 +274,49 @@ function M.command(args)
   end
 
   local namespaces = detect_namespaces(lua_dir)
-  if #namespaces == 0 then
-    vim.notify("[lazy-workspaces] no namespaces found under lua/", vim.log.levels.ERROR)
-    return
-  end
-
   local results = {}
-  for _, ns in ipairs(namespaces) do
-    local ns_dir = lua_dir .. "/" .. ns:gsub("%.", "/")
-    local plugin_res = rename_plugin_dir(ns_dir)
-    local init_res = transform_ns_init(ns_dir, ns)
-    local moved = disable_lazy_bootstrap_files(ns_dir)
-    local moved_res = #moved > 0 and ("moved: " .. table.concat(moved, ", ")) or "no lazy bootstrap files"
-    results[#results + 1] = ns .. ": plugins(" .. plugin_res .. "), init(" .. init_res .. "), " .. moved_res
+
+  if #namespaces == 0 then
+    local has_plugins = vim.fn.isdirectory(lua_dir .. "/plugins") == 1
+    local has_config  = vim.fn.isdirectory(lua_dir .. "/config") == 1
+
+    if not has_plugins and not has_config then
+      vim.notify("[lazy-workspaces] no namespaces found under lua/", vim.log.levels.ERROR)
+      return
+    end
+
+    if has_plugins then
+      local moved = migrate_flat_plugins(lua_dir)
+      results[#results + 1] = "plugins: moved specs(" .. #moved .. " files)"
+    end
+    if has_config then
+      local res = write_config_init(lua_dir .. "/config")
+      results[#results + 1] = "config: init(" .. res .. ")"
+    end
+
+    local loose = vim.fn.glob(lua_dir .. "/*.lua", false, true)
+    if #loose > 0 then
+      local names = {}
+      for _, f in ipairs(loose) do names[#names + 1] = vim.fn.fnamemodify(f, ":t") end
+      vim.notify(
+        "[lazy-workspaces] orphaned files in lua/ not claimed by any workspace: " .. table.concat(names, ", "),
+        vim.log.levels.WARN
+      )
+    end
+
+    if has_config  then namespaces[#namespaces + 1] = "config"  end
+    if has_plugins then namespaces[#namespaces + 1] = "plugins" end
+
+    disable_lazy_bootstrap_files(out_dir)
+  else
+    for _, ns in ipairs(namespaces) do
+      local ns_dir = lua_dir .. "/" .. ns:gsub("%.", "/")
+      local plugin_res = rename_plugin_dir(ns_dir)
+      local init_res = transform_ns_init(ns_dir, ns)
+      local moved = disable_lazy_bootstrap_files(ns_dir)
+      local moved_res = #moved > 0 and ("moved: " .. table.concat(moved, ", ")) or "no lazy bootstrap files"
+      results[#results + 1] = ns .. ": plugins(" .. plugin_res .. "), init(" .. init_res .. "), " .. moved_res
+    end
   end
 
   write_root_init(out_dir, namespaces)
@@ -255,6 +338,8 @@ M._test = {
   disable_lazy_bootstrap_files = disable_lazy_bootstrap_files,
   rename_plugin_dir = rename_plugin_dir,
   write_root_init = write_root_init,
+  migrate_flat_plugins = migrate_flat_plugins,
+  write_config_init = write_config_init,
 }
 
 return M
