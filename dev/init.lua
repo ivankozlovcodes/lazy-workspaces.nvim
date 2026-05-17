@@ -4,10 +4,10 @@ local repo = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h")
 vim.g.mapleader = " "
 vim.g.maplocalleader = " "
 
--- Isolate lazy data from main nvim install
+-- Sandbox: isolate lazy data and bootstrap lazy.nvim into sandbox dir.
+-- setup() detects lazy is already on rtp and skips its internal bootstrap.
 local lazypath = repo .. "/.sandbox/lazy/lazy.nvim"
 vim.env.LAZY = repo .. "/.sandbox/lazy"
-
 if not (vim.uv or vim.loop).fs_stat(lazypath) then
 	vim.fn.system({
 		"git",
@@ -20,22 +20,15 @@ if not (vim.uv or vim.loop).fs_stat(lazypath) then
 end
 vim.opt.rtp:prepend(lazypath)
 
-require("lazy").setup({
-	spec = {
+-- lazy-workspaces is already on rtp (repo = plugin root)
+vim.opt.rtp:prepend(repo)
+
+require("lazy-workspaces").setup({
+	configs = {
 		{
-			dir = repo,
-			name = "lazy-workspaces",
-			lazy = false,
-			priority = 1000,
-			opts = {
-				workspaces = {
-					{
-						url = "git@github.com:ivankozlovcodes/nvim.conf.d.git",
-						branch = "pluginize",
-						enable = { "common", "personal" },
-					},
-				},
-			},
+			url = "git@github.com:ivankozlovcodes/nvim.conf.d.git",
+			branch = "pluginize",
+			enable = { "common", "personal" },
 		},
 	},
 })

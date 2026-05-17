@@ -119,20 +119,24 @@ describe("fixture: johnnyjumper", function()
 			assert.is_true(H.file_exists(init_path))
 		end)
 
-		it("includes johnnyjumper in enable list", function()
-			assert.is_true(H.content_has(init_path, '"johnnyjumper"'))
+		it("includes configs key", function()
+			assert.is_true(H.content_has(init_path, "configs"))
 		end)
 
 		it("bootstraps lazy-workspaces", function()
 			assert.is_true(H.content_has(init_path, "lazy%-workspaces"))
 		end)
 
-		it("calls lazy-workspaces collect", function()
-			assert.is_true(H.content_has(init_path, "collect"))
+		it("calls lazy-workspaces setup", function()
+			assert.is_true(H.content_has(init_path, 'require%("lazy%-workspaces"%)%.setup'))
 		end)
 
-		it("calls lazy.setup", function()
-			assert.is_true(H.content_has(init_path, 'require%("lazy"%)%.setup'))
+		it("does not call lazy.setup directly", function()
+			assert.is_true(H.content_lacks(init_path, 'require%("lazy"%)%.setup'))
+		end)
+
+		it("does not call collect directly", function()
+			assert.is_true(H.content_lacks(init_path, "%.collect%("))
 		end)
 
 		it("sets workspace_root to output dir", function()
@@ -184,12 +188,12 @@ describe("fixture: nested namespaces", function()
 			init_path = out .. "/init.lua"
 		end)
 
-		it("includes myconfig.common in enable list", function()
-			assert.is_true(H.content_has(init_path, '"myconfig%.common"'))
+		it("includes configs key", function()
+			assert.is_true(H.content_has(init_path, "configs"))
 		end)
 
-		it("includes myconfig.personal in enable list", function()
-			assert.is_true(H.content_has(init_path, '"myconfig%.personal"'))
+		it("includes workspace_root url", function()
+			assert.is_true(H.content_has(init_path, "workspace_root"))
 		end)
 	end)
 
@@ -311,16 +315,24 @@ describe("fixture: flat config", function()
 			assert.is_true(H.file_exists(out .. "/init.lua"))
 		end)
 
-		it("includes config in enable list", function()
-			assert.is_true(H.content_has(out .. "/init.lua", '"config"'))
+		it("includes configs key", function()
+			assert.is_true(H.content_has(out .. "/init.lua", "configs"))
 		end)
 
-		it("includes plugins in enable list", function()
-			assert.is_true(H.content_has(out .. "/init.lua", '"plugins"'))
+		it("includes workspace_root url", function()
+			assert.is_true(H.content_has(out .. "/init.lua", "workspace_root"))
+		end)
+
+		it("bak file did not use lazy-workspaces", function()
+			assert.is_true(H.content_lacks(out .. "/init.lua.bak", "lazy%-workspaces"))
+		end)
+
+		it("new init.lua calls lazy-workspaces setup", function()
+			assert.is_true(H.content_has(out .. "/init.lua", 'require%("lazy%-workspaces"%)%.setup'))
 		end)
 
 		it("new init.lua does not call lazy.setup directly", function()
-			assert.is_true(H.content_lacks(out .. "/init.lua.bak", "lazy%-workspaces"))
+			assert.is_true(H.content_lacks(out .. "/init.lua", 'require%("lazy"%)%.setup'))
 		end)
 	end)
 end)
@@ -423,26 +435,26 @@ describe("write_config_init", function()
 	end)
 end)
 
--- ── unit: detect_namespaces ───────────────────────────────────────────────────
+-- ── unit: detect_workspaces ──────────────────────────────────────────────────
 
-describe("detect_namespaces", function()
-	local detect = bootstrap._test.detect_namespaces
+describe("detect_workspaces", function()
+	local detect = bootstrap._test.detect_workspaces
 
-	it("detects flat namespace", function()
+	it("detects flat workspace", function()
 		local src = H.make_tree({ ["lua/myns/init.lua"] = "-- ns" })
 		local ns = detect(src .. "/lua")
 		assert.are.same({ "myns" }, ns)
 		H.cleanup(src)
 	end)
 
-	it("detects dotted names under container dir", function()
+	it("detects slash-separated names under container dir", function()
 		local src = H.make_tree({
 			["lua/myconfig/common/init.lua"]   = "-- common",
 			["lua/myconfig/personal/init.lua"] = "-- personal",
 		})
 		local ns = detect(src .. "/lua")
 		table.sort(ns)
-		assert.are.same({ "myconfig.common", "myconfig.personal" }, ns)
+		assert.are.same({ "myconfig/common", "myconfig/personal" }, ns)
 		H.cleanup(src)
 	end)
 
@@ -480,38 +492,38 @@ describe("detect_namespaces", function()
 			["lua/myconfig/empty/placeholder.lua"]  = "-- not an init",
 		})
 		local ns = detect(src .. "/lua")
-		assert.are.same({ "myconfig.common" }, ns)
+		assert.are.same({ "myconfig/common" }, ns)
 		H.cleanup(src)
 	end)
 
 	it("handles mixed flat and container dirs at same level", function()
 		local src = H.make_tree({
-			["lua/flat/init.lua"]           = "-- flat",
+			["lua/flat/init.lua"]            = "-- flat",
 			["lua/container/child/init.lua"] = "-- child",
 		})
 		local ns = detect(src .. "/lua")
 		table.sort(ns)
-		assert.are.same({ "container.child", "flat" }, ns)
+		assert.are.same({ "container/child", "flat" }, ns)
 		H.cleanup(src)
 	end)
 
-	it("returns empty list when no valid namespaces found", function()
+	it("returns empty list when no valid workspaces found", function()
 		local src = H.make_tree({ ["lua/empty/placeholder.lua"] = "-- nothing" })
 		local ns = detect(src .. "/lua")
 		assert.are.same({}, ns)
 		H.cleanup(src)
 	end)
 
-	it("detects three-level deep namespace", function()
+	it("detects three-level deep workspace", function()
 		local src = H.make_tree({
 			["lua/org/team/config/init.lua"] = "-- config",
 		})
 		local ns = detect(src .. "/lua")
-		assert.are.same({ "org.team.config" }, ns)
+		assert.are.same({ "org/team/config" }, ns)
 		H.cleanup(src)
 	end)
 
-	it("emits WARN with full dotted container name for deep nesting", function()
+	it("emits WARN with slash container name for deep nesting", function()
 		local src = H.make_tree({
 			["lua/org/team/config/init.lua"] = "-- config",
 			["lua/org/team/orphan.lua"]      = "-- orphan",
@@ -525,7 +537,7 @@ describe("detect_namespaces", function()
 		end
 		detect(src .. "/lua")
 		vim.notify = orig_notify
-		assert.are.equal("org.team", warned_name)
+		assert.are.equal("org/team", warned_name)
 		H.cleanup(src)
 	end)
 end)
@@ -557,6 +569,12 @@ describe("strip_lazy_init", function()
 		local lines = { 'require("myns.lazy_init")', "x", 'require("myns.lazy_init")' }
 		local result = strip(lines, "myns")
 		assert.are.same({ "x" }, result)
+	end)
+
+	it("handles slash-separated workspace name (nested)", function()
+		local lines = { 'require("myconfig.common.lazy_init")', "other" }
+		local result = strip(lines, "myconfig/common")
+		assert.are.same({ "other" }, result)
 	end)
 end)
 

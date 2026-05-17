@@ -2,47 +2,13 @@ local M = {}
 
 -- TODO: show before/after diff in a float before writing
 
-local function detect_namespaces(lua_dir, prefix)
-  prefix = prefix or ""
-  local namespaces = {}
-
-  for _, dir in ipairs(vim.fn.glob(lua_dir .. "/*/", false, true)) do
-    local name = dir:match("/([^/]+)/$")
-    if not name then goto continue end
-
-    local full_name = prefix == "" and name or (prefix .. "." .. name)
-
-    if vim.fn.filereadable(dir .. "init.lua") == 1 then
-      namespaces[#namespaces + 1] = full_name
-    else
-      local children = detect_namespaces(dir, full_name)
-      if #children > 0 then
-        local loose = vim.fn.glob(dir .. "*.lua", false, true)
-        if #loose > 0 then
-          local names = {}
-          for _, f in ipairs(loose) do
-            names[#names + 1] = vim.fn.fnamemodify(f, ":t")
-          end
-          vim.notify(
-            "[lazy-workspaces] container '" .. full_name .. "' has loose files (not loaded as workspaces): "
-              .. table.concat(names, ", "),
-            vim.log.levels.WARN
-          )
-        end
-        vim.list_extend(namespaces, children)
-      end
-    end
-
-    ::continue::
-  end
-
-  return namespaces
-end
+local detect_workspaces = require("lazy-workspaces").detect_workspaces
 
 local function strip_lazy_init(lines, ns)
+  local mod_name = ns:gsub("/", ".")  -- slash names → dot notation for require() pattern
   local out = {}
   for _, line in ipairs(lines) do
-    if not line:match('require%(["\']' .. ns .. '%.lazy_init["\']%)') then
+    if not line:match('require%(["\']' .. mod_name .. '%.lazy_init["\']%)') then
       out[#out + 1] = line
     end
   end
@@ -158,16 +124,11 @@ local function rename_plugin_dir(ns_dir)
   return "no plugin dir"
 end
 
-local function write_root_init(out_dir, namespaces)
+local function write_root_init(out_dir)
   local leader = vim.g.mapleader or "\\"
   local localleader = vim.g.maplocalleader or "\\"
   local function q(v)
     return v == "\\" and '"\\\\"' or '"' .. v .. '"'
-  end
-
-  local enable_items = {}
-  for _, ns in ipairs(namespaces) do
-    enable_items[#enable_items + 1] = '"' .. ns .. '"'
   end
 
   local lines = {
@@ -180,17 +141,7 @@ local function write_root_init(out_dir, namespaces)
     "vim.g.mapleader = " .. q(leader),
     "vim.g.maplocalleader = " .. q(localleader),
     "",
-    "-- Bootstrap lazy.nvim",
-    'local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"',
-    "if not (vim.uv or vim.loop).fs_stat(lazypath) then",
-    "  vim.fn.system({",
-    '    "git", "clone", "--filter=blob:none", "--branch=stable",',
-    '    "https://github.com/folke/lazy.nvim.git", lazypath,',
-    "  })",
-    "end",
-    "vim.opt.rtp:prepend(lazypath)",
-    "",
-    "-- Bootstrap lazy-workspaces",
+    "-- Bootstrap lazy-workspaces.nvim",
     'local lwpath = vim.fn.stdpath("data") .. "/lazy/lazy-workspaces.nvim"',
     "if not (vim.uv or vim.loop).fs_stat(lwpath) then",
     "  vim.fn.system({",
@@ -200,23 +151,12 @@ local function write_root_init(out_dir, namespaces)
     "end",
     "vim.opt.rtp:prepend(lwpath)",
     "",
-    "local workspace_specs = {}",
-    "if (vim.uv or vim.loop).fs_stat(lwpath) then",
-    '  workspace_specs = require("lazy-workspaces").collect({',
-    "    workspaces = {",
-    "      {",
-    '        url = "file://" .. workspace_root,',
-    "        enable = { " .. table.concat(enable_items, ", ") .. " },",
-    "      },",
+    'require("lazy-workspaces").setup({',
+    "  configs = {",
+    "    {",
+    '      url = "file://" .. workspace_root,',
     "    },",
-    "  })",
-    "end",
-    "",
-    'require("lazy").setup({',
-    "  spec = vim.list_extend(workspace_specs, {",
-    '    { "ivankozlovcodes/lazy-workspaces.nvim", opts = {} },',
-    "  }),",
-    "  change_detection = { notify = false },",
+    "  },",
     "})",
   }
   vim.fn.writefile(lines, out_dir .. "/init.lua")
@@ -273,7 +213,7 @@ function M.command(args)
     return
   end
 
-  local namespaces = detect_namespaces(lua_dir)
+  local namespaces = detect_workspaces(lua_dir)
   local results = {}
 
   if #namespaces == 0 then
@@ -310,7 +250,7 @@ function M.command(args)
     disable_lazy_bootstrap_files(out_dir)
   else
     for _, ns in ipairs(namespaces) do
-      local ns_dir = lua_dir .. "/" .. ns:gsub("%.", "/")
+      local ns_dir = lua_dir .. "/" .. ns
       local plugin_res = rename_plugin_dir(ns_dir)
       local init_res = transform_ns_init(ns_dir, ns)
       local moved = disable_lazy_bootstrap_files(ns_dir)
@@ -319,7 +259,7 @@ function M.command(args)
     end
   end
 
-  write_root_init(out_dir, namespaces)
+  write_root_init(out_dir)
   results[#results + 1] = "wrote init.lua"
 
   local msg = "[lazy-workspaces] bootstrap → " .. out_dir .. "\n"
@@ -331,7 +271,7 @@ function M.command(args)
 end
 
 M._test = {
-  detect_namespaces = detect_namespaces,
+  detect_workspaces = detect_workspaces,
   strip_lazy_init = strip_lazy_init,
   wrap_in_setup = wrap_in_setup,
   transform_ns_init = transform_ns_init,

@@ -1,25 +1,60 @@
 local M = {}
 
+local _self_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
+
 ---@class WorkspaceSource
 ---@field url string        file:// path or git URL
 ---@field branch string?    git branch (optional, defaults to repo default)
 
 ---@class LazyWorkspacesOpts
----@field workspaces table<string, string|WorkspaceSource>  config_name → url string or {url,branch} table
+---@field configs table<string, string|WorkspaceSource>  config_name → url string or {url,branch} table
 
---- Scan lua_dir for workspace folders (dirs that contain init.lua).
+---@class LazyWorkspacesSetupOpts : LazyWorkspacesOpts
+---@field lazy table?  opts forwarded verbatim to lazy.setup() (rocks, change_detection, etc.)
+
+--- Recursively find workspace folders (dirs containing init.lua) under lua_dir.
+--- Returns slash-separated relative names: "ws" or "myconfig/common".
 ---@param lua_dir string
+---@param prefix string?
 ---@return string[]
-local function scan_workspaces(lua_dir)
-	local names = {}
+local function detect_workspaces(lua_dir, prefix)
+	prefix = prefix or ""
+	local result = {}
 	for _, dir in ipairs(vim.fn.glob(lua_dir .. "/*/", false, true)) do
+		local name = dir:match("/([^/]+)/$")
+		if not name then
+			goto continue
+		end
+		local rel = prefix == "" and name or (prefix .. "/" .. name)
 		local d = dir:gsub("/$", "")
 		if vim.fn.filereadable(d .. "/init.lua") == 1 then
-			names[#names + 1] = vim.fn.fnamemodify(d, ":t")
+			result[#result + 1] = rel
+		else
+			local children = detect_workspaces(d, rel)
+			if #children > 0 then
+				local loose = vim.fn.glob(d .. "/*.lua", false, true)
+				if #loose > 0 then
+					local names = {}
+					for _, f in ipairs(loose) do
+						names[#names + 1] = vim.fn.fnamemodify(f, ":t")
+					end
+					vim.notify(
+						"[lazy-workspaces] container '"
+							.. rel
+							.. "' has loose files (not loaded as workspaces): "
+							.. table.concat(names, ", "),
+						vim.log.levels.WARN
+					)
+				end
+				vim.list_extend(result, children)
+			end
 		end
+		::continue::
 	end
-	return names
+	return result
 end
+
+M.detect_workspaces = detect_workspaces
 
 --- Extract url and branch from a workspaces map value.
 ---@param value string|WorkspaceSource
@@ -75,7 +110,7 @@ function M.collect(opts)
 	local configs_map = {} -- { cfg_name = [ws_names] } for reconcile
 	local seen_paths = {}
 
-	for cfg_name, value in pairs(opts.workspaces or {}) do
+	for cfg_name, value in pairs(opts.configs or {}) do
 		local url, branch = parse_source(value)
 		local ok, path = pcall(resolver.resolve, url, branch)
 		if not ok then
@@ -94,10 +129,9 @@ function M.collect(opts)
 				if not vim.tbl_contains(vim.opt.rtp:get(), path) then
 					vim.opt.rtp:prepend(path)
 				end
-				package.path = package.path .. ";" .. path .. "/lua/?.lua" .. ";" .. path .. "/lua/?/init.lua"
 			end
 
-			local ws_names = scan_workspaces(path .. "/lua")
+			local ws_names = detect_workspaces(path .. "/lua")
 			if #ws_names > 0 then
 				resolved[#resolved + 1] = { cfg_name = cfg_name, path = path, ws_names = ws_names }
 				configs_map[cfg_name] = ws_names
@@ -131,19 +165,18 @@ function M.collect(opts)
 					end
 				end
 
+				local ws_init = entry.path .. "/lua/" .. ws_name .. "/init.lua"
 				vim.schedule(function()
-					local ok3, mod = pcall(require, ws_name)
-					if not ok3 then
+					local chunk, load_err = loadfile(ws_init)
+					if not chunk then
 						vim.notify(
-							"[lazy-workspaces] failed to load workspace '"
-								.. ws_name
-								.. "': "
-								.. tostring(mod),
+							"[lazy-workspaces] failed to load workspace '" .. ws_name .. "': " .. tostring(load_err),
 							vim.log.levels.WARN
 						)
 						return
 					end
-					if type(mod) == "table" and type(mod.setup) == "function" then
+					local ok3, mod = pcall(chunk)
+					if ok3 and type(mod) == "table" and type(mod.setup) == "function" then
 						local ok4, err = pcall(mod.setup)
 						if not ok4 then
 							vim.notify(
@@ -167,10 +200,7 @@ end
 local function apply_state(args, target_val, verb)
 	local raw = vim.trim(args.args)
 	if raw == "" then
-		vim.notify(
-			"[lazy-workspaces] usage: LazyWorkspaces" .. verb .. " [config/]<workspace>",
-			vim.log.levels.ERROR
-		)
+		vim.notify("[lazy-workspaces] usage: LazyWorkspaces" .. verb .. " [config/]<workspace>", vim.log.levels.ERROR)
 		return
 	end
 
@@ -181,9 +211,7 @@ local function apply_state(args, target_val, verb)
 	if cfg_name then
 		if not st[cfg_name] then
 			vim.notify(
-				"[lazy-workspaces] config '"
-					.. cfg_name
-					.. "' not found in lazy-workspaces.json (will be added)",
+				"[lazy-workspaces] config '" .. cfg_name .. "' not found in lazy-workspaces.json (will be added)",
 				vim.log.levels.WARN
 			)
 			st[cfg_name] = {}
@@ -202,9 +230,7 @@ local function apply_state(args, target_val, verb)
 		local matches = find_configs_with_ws(st, ws_name)
 		if #matches == 0 then
 			vim.notify(
-				"[lazy-workspaces] workspace '"
-					.. ws_name
-					.. "' not found in lazy-workspaces.json",
+				"[lazy-workspaces] workspace '" .. ws_name .. "' not found in lazy-workspaces.json",
 				vim.log.levels.ERROR
 			)
 			return
@@ -279,8 +305,7 @@ local function make_complete(want_val)
 	end
 end
 
---- Called by lazy.nvim when the plugin is loaded. Registers user commands.
-function M.setup()
+local function register_commands()
 	vim.api.nvim_create_user_command("LazyWorkspacesBootstrap", function(args)
 		require("lazy-workspaces.bootstrap").command(args)
 	end, { nargs = "*", desc = "Bootstrap nvim config to lazy-workspaces format", complete = "dir" })
@@ -301,5 +326,52 @@ function M.setup()
 		complete = make_complete(true),
 	})
 end
+
+--- Entry point. When called by user (before lazy.setup), bootstraps lazy.nvim, collects
+--- workspace specs, and calls lazy.setup(). When called by lazy as a config hook (second
+--- invocation), only registers user commands.
+---@param user_opts LazyWorkspacesSetupOpts?
+function M.setup(user_opts)
+	local ok, lazy_cfg = pcall(require, "lazy.core.config")
+	if ok and lazy_cfg.options ~= nil then
+		-- called by lazy config hook (old API compat)
+		register_commands()
+		return
+	end
+	user_opts = user_opts or {}
+
+	-- Bootstrap lazy.nvim only if not already on rtp
+	if not pcall(require, "lazy") then
+		local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
+		if not (vim.uv or vim.loop).fs_stat(lazypath) then
+			vim.fn.system({
+				"git",
+				"clone",
+				"--filter=blob:none",
+				"https://github.com/folke/lazy.nvim.git",
+				"--branch=stable",
+				lazypath,
+			})
+		end
+		vim.opt.rtp:prepend(lazypath)
+	end
+
+	local workspace_specs = M.collect({ configs = user_opts.configs })
+
+	register_commands()
+
+	-- Self-register so lazy manages lazy-workspaces (updates, UI, etc.)
+	local self_spec = { dir = _self_path, name = "lazy-workspaces", lazy = false, priority = 1000 }
+	local full_spec = vim.list_extend({ self_spec }, workspace_specs)
+
+	local lazy_opts = user_opts.lazy or {}
+	require("lazy").setup(vim.tbl_deep_extend("force", lazy_opts, { spec = full_spec }))
+end
+
+M._test = {
+	self_path = function()
+		return _self_path
+	end,
+}
 
 return M
