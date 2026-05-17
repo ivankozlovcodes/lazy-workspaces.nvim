@@ -8,6 +8,7 @@ local _self_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h
 
 ---@class LazyWorkspacesOpts
 ---@field configs table<string, string|WorkspaceSource>  config_name → url string or {url,branch} table
+---@field specs string[]?  subdirectory names scanned for lazy specs (default: {"plugins"})
 
 ---@class LazyWorkspacesSetupOpts : LazyWorkspacesOpts
 ---@field lazy table?  opts forwarded verbatim to lazy.setup() (rocks, change_detection, etc.)
@@ -161,19 +162,22 @@ function M.collect(opts)
 		local cfg_effective = effective[entry.cfg_name] or {}
 		for _, ws_name in ipairs(entry.ws_names) do
 			if cfg_effective[ws_name] then
-				local plugins_dir = entry.path .. "/lua/" .. ws_name .. "/plugins"
-				if vim.fn.isdirectory(plugins_dir) == 1 then
-					for _, file in ipairs(vim.fn.glob(plugins_dir .. "/*.lua", false, true)) do
-						local chunk, err = loadfile(file)
-						if not chunk then
-							vim.notify(
-								"[lazy-workspaces] failed to load spec " .. file .. ": " .. tostring(err),
-								vim.log.levels.WARN
-							)
-						else
-							local ok2, spec = pcall(chunk)
-							if ok2 and type(spec) == "table" then
-								specs[#specs + 1] = spec
+				local ws_root = entry.path .. "/lua/" .. ws_name
+				for _, spec_dir in ipairs(opts.specs or { "plugins" }) do
+					local dir = ws_root .. "/" .. spec_dir
+					if vim.fn.isdirectory(dir) == 1 then
+						for _, file in ipairs(vim.fn.glob(dir .. "/*.lua", false, true)) do
+							local chunk, err = loadfile(file)
+							if not chunk then
+								vim.notify(
+									"[lazy-workspaces] failed to load spec " .. file .. ": " .. tostring(err),
+									vim.log.levels.WARN
+								)
+							else
+								local ok2, spec = pcall(chunk)
+								if ok2 and type(spec) == "table" then
+									specs[#specs + 1] = spec
+								end
 							end
 						end
 					end
@@ -330,7 +334,7 @@ function M.setup(user_opts)
 		vim.opt.rtp:prepend(lazypath)
 	end
 
-	local workspace_specs = M.collect({ configs = user_opts.configs })
+	local workspace_specs = M.collect({ configs = user_opts.configs, specs = user_opts.specs })
 
 	register_commands()
 

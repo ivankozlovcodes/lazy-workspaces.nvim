@@ -21,4 +21,5 @@ require("lazy-workspaces").setup({
 	configs = {
 		default = { url = "file://__OUT_DIR__" },
 	},
+	-- __SPECS__
 })

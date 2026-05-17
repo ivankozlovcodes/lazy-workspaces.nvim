@@ -240,6 +240,49 @@ describe("fixture: nested namespaces", function()
 	end)
 end)
 
+-- ── fixture: extra spec dirs (themes/ alongside plugins/) ────────────────────
+-- Mirrors ~/git/nvim.conf.d: myconfig/common has both plugins/ and themes/.
+-- Bootstrap should detect themes/ and emit specs = { "plugins", "themes" } in init.lua.
+
+describe("fixture: extra spec dirs", function()
+	local src, out
+
+	before_each(function()
+		src = H.make_tree({
+			["lua/myconfig/common/init.lua"]                   = "local M = {}\nfunction M.setup() end\nreturn M",
+			["lua/myconfig/common/plugins/some_plugin.lua"]    = "return { 'author/some_plugin' }",
+			["lua/myconfig/common/themes/kanagawa.lua"]        = "return { 'rebelot/kanagawa.nvim' }",
+			["lua/myconfig/personal/init.lua"]                 = "local M = {}\nfunction M.setup() end\nreturn M",
+		})
+		out = vim.fn.tempname()
+		vim.fn.mkdir(out, "p")
+		run_bootstrap(src, out)
+	end)
+
+	after_each(function()
+		H.cleanup(src)
+		H.cleanup(out)
+	end)
+
+	it("includes specs with both plugins and themes in generated init.lua", function()
+		assert.is_true(H.content_has(out .. "/init.lua", '"plugins"'))
+		assert.is_true(H.content_has(out .. "/init.lua", '"themes"'))
+	end)
+
+	it("does not emit specs line when only plugins/ present", function()
+		local src2 = H.make_tree({
+			["lua/myconfig/common/init.lua"]                = "local M = {}\nfunction M.setup() end\nreturn M",
+			["lua/myconfig/common/plugins/foo.lua"]         = "return { 'a/b' }",
+		})
+		local out2 = vim.fn.tempname()
+		vim.fn.mkdir(out2, "p")
+		run_bootstrap(src2, out2)
+		assert.is_true(H.content_lacks(out2 .. "/init.lua", "specs"))
+		H.cleanup(src2)
+		H.cleanup(out2)
+	end)
+end)
+
 -- ── fixture: flat config (plugins/ + config/) ────────────────────────────────
 -- No namespace init.lua anywhere — detect_namespaces returns empty.
 -- Bootstrap falls back to flat migration: plugins/ + config/ become workspaces.
