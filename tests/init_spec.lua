@@ -277,11 +277,11 @@ describe("write_root_init output shape", function()
 		H.cleanup(out)
 	end)
 
-	it("includes workspace_root url", function()
+	it("includes workspace url with out_dir path", function()
 		local out = vim.fn.tempname()
 		vim.fn.mkdir(out, "p")
 		write_ri(out)
-		assert.is_true(H.content_has(out .. "/init.lua", "workspace_root"))
+		assert.is_true(H.content_has(out .. "/init.lua", vim.pesc(out)))
 		H.cleanup(out)
 	end)
 

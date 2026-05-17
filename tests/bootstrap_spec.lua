@@ -192,8 +192,8 @@ describe("fixture: nested namespaces", function()
 			assert.is_true(H.content_has(init_path, "configs"))
 		end)
 
-		it("includes workspace_root url", function()
-			assert.is_true(H.content_has(init_path, "workspace_root"))
+		it("includes workspace url with out_dir path", function()
+			assert.is_true(H.content_has(init_path, vim.pesc(out)))
 		end)
 	end)
 
@@ -319,8 +319,8 @@ describe("fixture: flat config", function()
 			assert.is_true(H.content_has(out .. "/init.lua", "configs"))
 		end)
 
-		it("includes workspace_root url", function()
-			assert.is_true(H.content_has(out .. "/init.lua", "workspace_root"))
+		it("includes workspace url with out_dir path", function()
+			assert.is_true(H.content_has(out .. "/init.lua", vim.pesc(out)))
 		end)
 
 		it("bak file did not use lazy-workspaces", function()
