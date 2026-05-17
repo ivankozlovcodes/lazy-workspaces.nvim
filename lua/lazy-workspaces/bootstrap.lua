@@ -168,8 +168,13 @@ function M.command(args)
   end
 
   local confirm = vim.fn.confirm(
-    string.format("lazy-workspaces bootstrap\n\n  src: %s\n  out: %s\n\nCopy src → out and rewrite files. Proceed?", src_dir, out_dir),
-    "&Yes\n&No", 2
+    string.format(
+      "lazy-workspaces bootstrap\n\n  src: %s\n  out: %s\n\nCopy src → out and rewrite files. Proceed?",
+      src_dir,
+      out_dir
+    ),
+    "&Yes\n&No",
+    2
   )
   if confirm ~= 1 then
     vim.notify("[lazy-workspaces] bootstrap cancelled", vim.log.levels.INFO)
@@ -215,5 +220,15 @@ function M.command(args)
   msg = msg .. "\nTest: nvim -u " .. out_dir .. "/init.lua"
   vim.notify(msg, vim.log.levels.INFO)
 end
+
+M._test = {
+  detect_namespaces = detect_namespaces,
+  strip_lazy_init = strip_lazy_init,
+  wrap_in_setup = wrap_in_setup,
+  transform_ns_init = transform_ns_init,
+  disable_lazy_bootstrap_files = disable_lazy_bootstrap_files,
+  rename_plugin_dir = rename_plugin_dir,
+  write_root_init = write_root_init,
+}
 
 return M
