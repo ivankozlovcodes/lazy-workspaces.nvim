@@ -34,12 +34,41 @@ function M.read()
 	return result
 end
 
---- Writes nested state table as compact single-line JSON. Emits ERROR on write failure.
+---@param state table<string, table<string, boolean>>
+---@return string
+local function pretty_encode(state)
+	local cfg_keys = vim.tbl_keys(state)
+	table.sort(cfg_keys)
+	if #cfg_keys == 0 then
+		return "{}"
+	end
+	local lines = {"{"}
+	for i, cfg in ipairs(cfg_keys) do
+		local ws_map = state[cfg]
+		local ws_keys = vim.tbl_keys(ws_map)
+		table.sort(ws_keys)
+		local cfg_comma = i < #cfg_keys and "," or ""
+		if #ws_keys == 0 then
+			lines[#lines + 1] = "  " .. vim.json.encode(cfg) .. ": {}" .. cfg_comma
+		else
+			lines[#lines + 1] = "  " .. vim.json.encode(cfg) .. ": {"
+			for j, ws in ipairs(ws_keys) do
+				local ws_comma = j < #ws_keys and "," or ""
+				lines[#lines + 1] = "    " .. vim.json.encode(ws) .. ": " .. (ws_map[ws] and "true" or "false") .. ws_comma
+			end
+			lines[#lines + 1] = "  }" .. cfg_comma
+		end
+	end
+	lines[#lines + 1] = "}"
+	return table.concat(lines, "\n")
+end
+
+--- Writes nested state table as pretty-printed JSON. Emits ERROR on write failure.
 ---@param state table<string, table<string, boolean>>
 function M.write(state)
 	local p = M.path()
-	local encoded = vim.json.encode(state)
-	local ret = vim.fn.writefile({ encoded }, p)
+	local encoded = pretty_encode(state)
+	local ret = vim.fn.writefile(vim.split(encoded, "\n"), p)
 	if ret ~= 0 then
 		vim.notify("[lazy-workspaces] failed to write " .. p, vim.log.levels.ERROR)
 	end

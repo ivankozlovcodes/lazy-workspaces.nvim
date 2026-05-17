@@ -68,19 +68,6 @@ local function parse_source(value)
 	error("invalid workspace source type: " .. type(value))
 end
 
---- Parse command argument into optional config name and workspace name.
---- "config/ws" → "config", "ws"
---- "ws"        → nil, "ws"
----@param arg string
----@return string|nil, string
-local function parse_cmd_arg(arg)
-	local slash = arg:find("/", 1, true)
-	if slash then
-		return arg:sub(1, slash - 1), arg:sub(slash + 1)
-	end
-	return nil, arg
-end
-
 --- Return list of config names in state that contain a given workspace name.
 ---@param state table
 ---@param ws_name string
@@ -105,12 +92,39 @@ function M.collect(opts)
 	local state_mod = require("lazy-workspaces.state")
 	local specs = {}
 
+	-- Derive a human-readable config name from a URL:
+	--   file:///tmp/nvim              → /tmp/nvim
+	--   git@github.com:user/repo.git  → user/repo
+	--   https://github.com/user/repo  → user/repo
+	local function name_from_url(url)
+		local file_path = url:match("^file://(.+)$")
+		if file_path then return file_path end
+		local ssh_path = url:match("^git@[^:]+:(.+)$")
+		if ssh_path then return ssh_path:gsub("%.git$", "") end
+		local two_seg = url:match("([^/]+/[^/]+)$")
+		if two_seg then return two_seg:gsub("%.git$", "") end
+		return url
+	end
+
+	-- Normalize configs: derive name from URL for numeric keys (array-style configs)
+	local named_configs = {}
+	for k, v in pairs(opts.configs or {}) do
+		local name
+		if type(k) == "string" then
+			name = k
+		else
+			local url = type(v) == "string" and v or (type(v) == "table" and v.url or tostring(k))
+			name = name_from_url(url)
+		end
+		named_configs[name] = v
+	end
+
 	-- Pass 1: resolve each config URL → local path, scan workspace dirs on disk
 	local resolved = {} -- { cfg_name, path, ws_names[] }
 	local configs_map = {} -- { cfg_name = [ws_names] } for reconcile
 	local seen_paths = {}
 
-	for cfg_name, value in pairs(opts.configs or {}) do
+	for cfg_name, value in pairs(named_configs) do
 		local url, branch = parse_source(value)
 		local ok, path = pcall(resolver.resolve, url, branch)
 		if not ok then
@@ -200,64 +214,39 @@ end
 local function apply_state(args, target_val, verb)
 	local raw = vim.trim(args.args)
 	if raw == "" then
-		vim.notify("[lazy-workspaces] usage: LazyWorkspaces" .. verb .. " [config/]<workspace>", vim.log.levels.ERROR)
+		vim.notify("[lazy-workspaces] usage: LazyWorkspaces" .. verb .. " <workspace>", vim.log.levels.ERROR)
 		return
 	end
 
 	local s = require("lazy-workspaces.state")
 	local st = s.read()
-	local cfg_name, ws_name = parse_cmd_arg(raw)
 
-	if cfg_name then
-		if not st[cfg_name] then
-			vim.notify(
-				"[lazy-workspaces] config '" .. cfg_name .. "' not found in lazy-workspaces.json (will be added)",
-				vim.log.levels.WARN
-			)
-			st[cfg_name] = {}
-		elseif st[cfg_name][ws_name] == nil then
-			vim.notify(
-				"[lazy-workspaces] '"
-					.. cfg_name
-					.. "/"
-					.. ws_name
-					.. "' not found in lazy-workspaces.json (will be added)",
-				vim.log.levels.WARN
-			)
-		end
-		st[cfg_name][ws_name] = target_val
-	else
-		local matches = find_configs_with_ws(st, ws_name)
-		if #matches == 0 then
-			vim.notify(
-				"[lazy-workspaces] workspace '" .. ws_name .. "' not found in lazy-workspaces.json",
-				vim.log.levels.ERROR
-			)
-			return
-		elseif #matches > 1 then
-			table.sort(matches)
-			local suggestions = {}
-			for _, cfg in ipairs(matches) do
-				suggestions[#suggestions + 1] = cfg .. "/" .. ws_name
-			end
-			vim.notify(
-				"[lazy-workspaces] ambiguous workspace '"
-					.. ws_name
-					.. "' — use one of: "
-					.. table.concat(suggestions, ", "),
-				vim.log.levels.ERROR
-			)
-			return
-		else
-			st[matches[1]][ws_name] = target_val
-		end
+	-- Search by full workspace name (workspace names may contain slashes; config names
+	-- are URLs which also contain slashes, so cfg/ws splitting is not a usable format).
+	local matches = find_configs_with_ws(st, raw)
+	if #matches == 0 then
+		vim.notify(
+			"[lazy-workspaces] workspace '" .. raw .. "' not found in lazy-workspaces.json",
+			vim.log.levels.ERROR
+		)
+		return
+	elseif #matches > 1 then
+		table.sort(matches)
+		vim.notify(
+			"[lazy-workspaces] workspace '"
+				.. raw
+				.. "' exists in multiple configs: "
+				.. table.concat(matches, ", "),
+			vim.log.levels.ERROR
+		)
+		return
 	end
 
+	st[matches[1]][raw] = target_val
 	s.write(st)
 	vim.notify(
 		"[lazy-workspaces] '"
-			.. (cfg_name and (cfg_name .. "/") or "")
-			.. ws_name
+			.. raw
 			.. "' "
 			.. (target_val and "included" or "excluded")
 			.. " (restart Neovim to apply)",
@@ -272,30 +261,15 @@ end
 local function make_complete(want_val)
 	return function(arglead)
 		local st = require("lazy-workspaces.state").read()
-		local ws_counts = {}
+		local out = {}
+		local seen = {}
 		for _, ws_map in pairs(st) do
 			if type(ws_map) == "table" then
 				for ws_name, included in pairs(ws_map) do
-					if included == want_val then
-						ws_counts[ws_name] = (ws_counts[ws_name] or 0) + 1
-					end
-				end
-			end
-		end
-
-		local out = {}
-		local seen = {}
-		for cfg, ws_map in pairs(st) do
-			if type(ws_map) == "table" then
-				for ws_name, included in pairs(ws_map) do
-					if included == want_val then
-						local key = cfg .. "\0" .. ws_name
-						if not seen[key] then
-							seen[key] = true
-							local completion = ws_counts[ws_name] > 1 and (cfg .. "/" .. ws_name) or ws_name
-							if completion:sub(1, #arglead) == arglead then
-								out[#out + 1] = completion
-							end
+					if included == want_val and not seen[ws_name] then
+						seen[ws_name] = true
+						if ws_name:sub(1, #arglead) == arglead then
+							out[#out + 1] = ws_name
 						end
 					end
 				end
