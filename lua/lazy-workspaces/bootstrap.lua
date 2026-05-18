@@ -114,17 +114,6 @@ local function disable_lazy_bootstrap_files(ns_dir)
 	return moved
 end
 
-local function rename_plugin_dir(ns_dir)
-	local lazy_dir = ns_dir .. "/lazy"
-	local plugins_dir = ns_dir .. "/plugins"
-	if vim.fn.isdirectory(lazy_dir) == 1 then
-		vim.fn.rename(lazy_dir, plugins_dir)
-		return "lazy/ → plugins/"
-	elseif vim.fn.isdirectory(plugins_dir) == 1 then
-		return "plugins/ already exists"
-	end
-	return "no plugin dir"
-end
 
 ---@param out_dir string
 ---@param spec_dirs string[]?  defaults to {"plugins"} — only written when non-default
@@ -273,11 +262,10 @@ function M.command(args)
 	else
 		for _, ns in ipairs(namespaces) do
 			local ns_dir = lua_dir .. "/" .. ns
-			local plugin_res = rename_plugin_dir(ns_dir)
 			local init_res = transform_ns_init(ns_dir, ns)
 			local moved = disable_lazy_bootstrap_files(ns_dir)
 			local moved_res = #moved > 0 and ("moved: " .. table.concat(moved, ", ")) or "no lazy bootstrap files"
-			results[#results + 1] = ns .. ": plugins(" .. plugin_res .. "), init(" .. init_res .. "), " .. moved_res
+			results[#results + 1] = ns .. ": init(" .. init_res .. "), " .. moved_res
 		end
 	end
 
@@ -316,7 +304,6 @@ M._test = {
 	wrap_in_setup = wrap_in_setup,
 	transform_ns_init = transform_ns_init,
 	disable_lazy_bootstrap_files = disable_lazy_bootstrap_files,
-	rename_plugin_dir = rename_plugin_dir,
 	write_root_init = write_root_init,
 	migrate_flat_plugins = migrate_flat_plugins,
 	write_config_init = write_config_init,

@@ -181,6 +181,41 @@ describe("collect()", function()
 		end)
 	end)
 
+	it("loads specs from custom spec dir (lazy/) when specified in opts.specs", function()
+		with_state(function()
+			local root = make_workspace({
+				["lua/mws/lazy/foo.lua"] = "return { 'foo/bar' }",
+			})
+			local specs = lw.collect({ configs = { ws1 = { source = root } }, specs = { "lazy" } })
+			H.cleanup(root)
+			assert.are.equal(1, #specs)
+		end)
+	end)
+
+	it("includes non-lazy-spec tables (cannot distinguish from valid specs)", function()
+		with_state(function()
+			local root = make_workspace({
+				["lua/mws/plugins/config_table.lua"] = "return { key = 'value' }",
+			})
+			local specs = lw.collect({ configs = { ws1 = { source = root } } })
+			H.cleanup(root)
+			-- table passes through — lazy.setup() would receive it and may error
+			assert.are.equal(1, #specs)
+		end)
+	end)
+
+	it("skips non-table return values from spec files silently", function()
+		with_state(function()
+			local root = make_workspace({
+				["lua/mws/plugins/not_a_spec.lua"] = "return 'just a string'",
+				["lua/mws/plugins/valid.lua"]       = "return { 'foo/bar' }",
+			})
+			local specs = lw.collect({ configs = { ws1 = { source = root } } })
+			H.cleanup(root)
+			assert.are.equal(1, #specs)
+		end)
+	end)
+
 	it("collects specs from multiple workspaces in same config", function()
 		with_state(function()
 			local root = H.make_tree({
