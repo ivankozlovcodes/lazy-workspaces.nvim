@@ -3,11 +3,11 @@ local M = {}
 local _self_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
 
 ---@class WorkspaceSource
----@field url string        file:// path or git URL
+---@field source string     local path (absolute or ~) or git URL (git@, https://)
 ---@field branch string?    git branch (optional, defaults to repo default)
 
 ---@class LazyWorkspacesOpts
----@field configs table<string, string|WorkspaceSource>  config_name → url string or {url,branch} table
+---@field configs table<string, string|WorkspaceSource>  config_name → source string or {source,branch} table
 ---@field specs string[]?  subdirectory names scanned for lazy specs (default: {"plugins"})
 
 ---@class LazyWorkspacesSetupOpts : LazyWorkspacesOpts
@@ -57,14 +57,14 @@ end
 
 M.detect_workspaces = detect_workspaces
 
---- Extract url and branch from a workspaces map value.
+--- Extract source and branch from a config value.
 ---@param value string|WorkspaceSource
 ---@return string, string|nil
 local function parse_source(value)
 	if type(value) == "string" then
 		return value, nil
 	elseif type(value) == "table" then
-		return value.url, value.branch
+		return value.source, value.branch
 	end
 	error("invalid workspace source type: " .. type(value))
 end
@@ -93,29 +93,29 @@ function M.collect(opts)
 	local state_mod = require("lazy-workspaces.state")
 	local specs = {}
 
-	-- Derive a human-readable config name from a URL:
-	--   file:///tmp/nvim              → /tmp/nvim
+	-- Derive a human-readable config name from a source:
+	--   /tmp/nvim                     → /tmp/nvim  (local path, used as-is)
 	--   git@github.com:user/repo.git  → user/repo
 	--   https://github.com/user/repo  → user/repo
-	local function name_from_url(url)
-		local file_path = url:match("^file://(.+)$")
-		if file_path then return file_path end
-		local ssh_path = url:match("^git@[^:]+:(.+)$")
+	local function name_from_source(source)
+		local ssh_path = source:match("^git@[^:]+:(.+)$")
 		if ssh_path then return ssh_path:gsub("%.git$", "") end
-		local two_seg = url:match("([^/]+/[^/]+)$")
-		if two_seg then return two_seg:gsub("%.git$", "") end
-		return url
+		if source:match("^https?://") then
+			local two_seg = source:match("([^/]+/[^/]+)$")
+			if two_seg then return two_seg:gsub("%.git$", "") end
+		end
+		return source
 	end
 
-	-- Normalize configs: derive name from URL for numeric keys (array-style configs)
+	-- Normalize configs: derive name from source for numeric keys (array-style configs)
 	local named_configs = {}
 	for k, v in pairs(opts.configs or {}) do
 		local name
 		if type(k) == "string" then
 			name = k
 		else
-			local url = type(v) == "string" and v or (type(v) == "table" and v.url or tostring(k))
-			name = name_from_url(url)
+			local source = type(v) == "string" and v or (type(v) == "table" and v.source or tostring(k))
+			name = name_from_source(source)
 		end
 		named_configs[name] = v
 	end

@@ -71,7 +71,7 @@ describe("collect()", function()
 					errored = true
 				end
 			end
-			local specs = lw.collect({ configs = { bad = { url = "file:///nonexistent/path/xyz" } } })
+			local specs = lw.collect({ configs = { bad = { source = "/nonexistent/path/xyz" } } })
 			vim.notify = orig
 			assert.is_true(errored)
 			assert.are.same({}, specs)
@@ -81,7 +81,7 @@ describe("collect()", function()
 	it("returns empty specs when workspace has no plugins/ dir", function()
 		with_state(function()
 			local root = make_workspace()
-			local specs = lw.collect({ configs = { ws1 = { url = "file://" .. root } } })
+			local specs = lw.collect({ configs = { ws1 = { source = root } } })
 			H.cleanup(root)
 			assert.are.same({}, specs)
 		end)
@@ -92,7 +92,7 @@ describe("collect()", function()
 			local root = make_workspace({
 				["lua/mws/plugins/foo.lua"] = "return { 'foo/bar', opts = {} }",
 			})
-			local specs = lw.collect({ configs = { ws1 = { url = "file://" .. root } } })
+			local specs = lw.collect({ configs = { ws1 = { source = root } } })
 			H.cleanup(root)
 			assert.are.equal(1, #specs)
 		end)
@@ -104,7 +104,7 @@ describe("collect()", function()
 				["lua/mws/plugins/foo.lua"] = "return { 'foo/bar' }",
 				["lua/mws/plugins/baz.lua"] = "return { 'baz/qux' }",
 			})
-			local specs = lw.collect({ configs = { ws1 = { url = "file://" .. root } } })
+			local specs = lw.collect({ configs = { ws1 = { source = root } } })
 			H.cleanup(root)
 			assert.are.equal(2, #specs)
 		end)
@@ -123,7 +123,7 @@ describe("collect()", function()
 					warned = true
 				end
 			end
-			local specs = lw.collect({ configs = { ws1 = { url = "file://" .. root } } })
+			local specs = lw.collect({ configs = { ws1 = { source = root } } })
 			vim.notify = orig
 			H.cleanup(root)
 			assert.is_true(warned)
@@ -138,7 +138,7 @@ describe("collect()", function()
 			})
 			-- pre-write state with mws excluded
 			state.write({ ws1 = { mws = false } })
-			local specs = lw.collect({ configs = { ws1 = { url = "file://" .. root } } })
+			local specs = lw.collect({ configs = { ws1 = { source = root } } })
 			H.cleanup(root)
 			assert.are.same({}, specs)
 		end)
@@ -150,7 +150,7 @@ describe("collect()", function()
 				["lua/mws/plugins/foo.lua"] = "return { 'foo/bar' }",
 			})
 			state.write({ ws1 = { mws = true } })
-			local specs = lw.collect({ configs = { ws1 = { url = "file://" .. root } } })
+			local specs = lw.collect({ configs = { ws1 = { source = root } } })
 			H.cleanup(root)
 			assert.are.equal(1, #specs)
 		end)
@@ -159,7 +159,7 @@ describe("collect()", function()
 	it("adds workspace path to rtp", function()
 		with_state(function()
 			local root = make_workspace()
-			lw.collect({ configs = { ws1 = { url = "file://" .. root } } })
+			lw.collect({ configs = { ws1 = { source = root } } })
 			local rtp = vim.opt.rtp:get()
 			local found = vim.tbl_contains(rtp, root)
 			H.cleanup(root)
@@ -170,8 +170,8 @@ describe("collect()", function()
 	it("does not add workspace path to rtp twice on repeated calls", function()
 		with_state(function()
 			local root = make_workspace()
-			lw.collect({ configs = { ws1 = { url = "file://" .. root } } })
-			lw.collect({ configs = { ws1 = { url = "file://" .. root } } })
+			lw.collect({ configs = { ws1 = { source = root } } })
+			lw.collect({ configs = { ws1 = { source = root } } })
 			local count = 0
 			for _, p in ipairs(vim.opt.rtp:get()) do
 				if p == root then count = count + 1 end
@@ -189,7 +189,7 @@ describe("collect()", function()
 				["lua/ws_b/init.lua"] = "local M = {}\nfunction M.setup() end\nreturn M",
 				["lua/ws_b/plugins/beta.lua"] = "return { 'b/beta' }",
 			})
-			local specs = lw.collect({ configs = { cfg1 = { url = "file://" .. root } } })
+			local specs = lw.collect({ configs = { cfg1 = { source = root } } })
 			H.cleanup(root)
 			assert.are.equal(2, #specs)
 		end)

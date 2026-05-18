@@ -19,7 +19,7 @@ vim.opt.rtp:prepend(lwpath)
 
 require("lazy-workspaces").setup({
 	configs = {
-		default = { url = "file://__OUT_DIR__" },
+		default = { source = "__OUT_DIR__" },
 	},
 	-- __SPECS__
 })

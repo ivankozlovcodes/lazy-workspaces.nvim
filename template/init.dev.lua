@@ -8,7 +8,7 @@ vim.opt.rtp:prepend("__PLUGIN_ROOT__")
 
 require("lazy-workspaces").setup({
 	configs = {
-		default = { url = "file://__OUT_DIR__" },
+		default = { source = "__OUT_DIR__" },
 	},
 	-- __SPECS__
 })
