@@ -388,8 +388,13 @@ function M.setup(user_opts)
 
 	register_commands()
 
-	-- Self-register so lazy manages lazy-workspaces (updates, UI, etc.)
-	local self_spec = { dir = _self_path, name = "lazy-workspaces", lazy = false, priority = 1000 }
+	local lw_dev = vim.env.LW_DEV ~= nil
+	local self_spec = {
+		"ivankozlovcodes/lazy-workspaces.nvim",
+		lazy = false,
+		priority = 1000,
+		dev = lw_dev,
+	}
 	local full_spec = vim.list_extend({ self_spec }, workspace_specs)
 
 	local lazy_opts = user_opts.lazy or {}
