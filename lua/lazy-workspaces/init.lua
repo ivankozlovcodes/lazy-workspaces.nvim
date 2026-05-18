@@ -1,6 +1,7 @@
 local M = {}
 
 local _self_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
+local _opts = nil
 
 ---@class WorkspaceSource
 ---@field source string     local path (absolute or ~) or git URL (git@, https://)
@@ -358,6 +359,7 @@ function M.setup(user_opts)
 		return
 	end
 	user_opts = user_opts or {}
+	_opts = user_opts
 
 	-- Bootstrap lazy.nvim only if not already on rtp
 	if not pcall(require, "lazy") then
@@ -392,5 +394,9 @@ M._test = {
 		return _self_path
 	end,
 }
+
+function M._get_opts()
+	return _opts
+end
 
 return M

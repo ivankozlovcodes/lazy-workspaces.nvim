@@ -79,7 +79,7 @@ end
 --- Rules:
 ---   config/ws not in JSON  → add as true, mark dirty
 ---   config/ws in JSON      → keep value
----   JSON config/ws not in input → WARN "stale entry", keep key
+---   JSON config/ws not in input → keep key (surfaced by :checkhealth)
 --- Saves if dirty. Returns { config_name = { ws_name = bool } } for all input entries.
 ---@param configs table<string, string[]>
 ---@return table<string, table<string, boolean>>
@@ -106,20 +106,7 @@ function M.reconcile(configs)
 		end
 	end
 
-	for cfg, ws_map in pairs(state) do
-		for ws_name in pairs(ws_map) do
-			if not known[cfg .. "\0" .. ws_name] then
-				vim.notify(
-					"[lazy-workspaces] stale entry in lazy-workspaces.json: '"
-						.. cfg
-						.. "/"
-						.. ws_name
-						.. "' not found in workspaces",
-					vim.log.levels.WARN
-				)
-			end
-		end
-	end
+	-- stale entries are surfaced by :checkhealth lazy-workspaces, not at startup
 
 	if dirty then
 		M.write(state)

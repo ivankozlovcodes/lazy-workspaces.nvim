@@ -114,37 +114,26 @@ describe("state", function()
 			assert.is_false(effective.ivan.work)
 		end)
 
-		it("emits WARN for stale JSON entry not in input configs", function()
+		it("keeps stale JSON entry without warning (surfaced by :checkhealth)", function()
 			state.write({ ivan = { ghost = true } })
 			local warned = false
 			local orig = vim.notify
-			vim.notify = function(msg, level)
-				if level == vim.log.levels.WARN and msg:match("stale") then
-					warned = true
-				end
+			vim.notify = function(_, level)
+				if level == vim.log.levels.WARN then warned = true end
 			end
 			state.reconcile({ ivan = { "common" } })
 			vim.notify = orig
-			assert.is_true(warned)
+			assert.is_false(warned)
 		end)
 
 		it("handles mix: new, true, false, and stale entries", function()
 			state.write({ ivan = { existing_true = true, existing_false = false, ghost = true } })
-			local warned_stale = false
-			local orig = vim.notify
-			vim.notify = function(msg, level)
-				if level == vim.log.levels.WARN and msg:match("stale") then
-					warned_stale = true
-				end
-			end
 			local effective = state.reconcile({ ivan = { "new_ws", "existing_true", "existing_false" } })
-			vim.notify = orig
 
 			assert.is_true(effective.ivan.new_ws)
 			assert.is_true(effective.ivan.existing_true)
 			assert.is_false(effective.ivan.existing_false)
 			assert.is_nil(effective.ivan.ghost)
-			assert.is_true(warned_stale)
 		end)
 
 		it("handles multiple configs independently", function()
