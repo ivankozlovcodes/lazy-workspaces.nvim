@@ -201,6 +201,14 @@ function M.command(args)
 		return
 	end
 
+	if vim.fn.isdirectory(out_dir) == 1 then
+		vim.notify(
+			"[lazy-workspaces] out dir already exists: " .. out_dir .. "\nRemove it first or choose a different output path.",
+			vim.log.levels.WARN
+		)
+		return
+	end
+
 	vim.fn.mkdir(out_dir, "p")
 	local cp_out = vim.fn.system({ "cp", "-r", src_dir .. "/.", out_dir })
 	if vim.v.shell_error ~= 0 then

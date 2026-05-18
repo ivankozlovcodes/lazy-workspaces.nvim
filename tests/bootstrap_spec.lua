@@ -10,6 +10,29 @@ local function run_bootstrap(src, out)
 	notify_stub:revert()
 end
 
+-- ── out dir guard ────────────────────────────────────────────────────────────
+
+describe("out dir guard", function()
+	it("warns and aborts when out dir already exists", function()
+		local src = H.make_tree({ ["lua/ws/init.lua"] = "local M={}\nfunction M.setup()end\nreturn M" })
+		local out = vim.fn.tempname()
+		vim.fn.mkdir(out, "p")
+
+		local warned = false
+		local notify_stub = stub(vim, "notify")
+		notify_stub.invokes(function(_, level)
+			if level == vim.log.levels.WARN then warned = true end
+		end)
+		bootstrap.command({ args = src .. " " .. out })
+		notify_stub:revert()
+
+		assert.is_true(warned)
+		assert.is_false(H.file_exists(out .. "/init.lua"))
+		H.cleanup(src)
+		H.cleanup(out)
+	end)
+end)
+
 -- ── johnnyjumper fixture ───────────────────────────────────────────────────────
 -- Single namespace, lazy/ plugin dir, lazy_init.lua bootstrap file,
 -- plus a lua/user/ subfolder with no init.lua (must NOT be detected as namespace)
@@ -26,7 +49,6 @@ describe("fixture: johnnyjumper", function()
 			["lua/user/vscode_keymaps.lua"]    = "-- vscode",
 		})
 		out = vim.fn.tempname()
-		vim.fn.mkdir(out, "p")
 		run_bootstrap(src, out)
 	end)
 
@@ -152,7 +174,6 @@ describe("fixture: nested namespaces", function()
 			["lua/myconfig/personal/init.lua"]              = "require('myconfig.personal.set')",
 		})
 		out = vim.fn.tempname()
-		vim.fn.mkdir(out, "p")
 		run_bootstrap(src, out)
 	end)
 
@@ -241,7 +262,6 @@ describe("fixture: extra spec dirs", function()
 			["lua/myconfig/personal/init.lua"]                 = "local M = {}\nfunction M.setup() end\nreturn M",
 		})
 		out = vim.fn.tempname()
-		vim.fn.mkdir(out, "p")
 		run_bootstrap(src, out)
 	end)
 
@@ -261,7 +281,6 @@ describe("fixture: extra spec dirs", function()
 			["lua/myconfig/common/plugins/foo.lua"]         = "return { 'a/b' }",
 		})
 		local out2 = vim.fn.tempname()
-		vim.fn.mkdir(out2, "p")
 		run_bootstrap(src2, out2)
 		assert.is_true(H.content_lacks(out2 .. "/init.lua", "specs"))
 		H.cleanup(src2)
@@ -285,7 +304,6 @@ describe("fixture: flat config", function()
 			["lua/config/keymaps.lua"]      = "vim.keymap.set('n', 'q', '<cmd>q<cr>')",
 		})
 		out = vim.fn.tempname()
-		vim.fn.mkdir(out, "p")
 		run_bootstrap(src, out)
 	end)
 
