@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # new-config.sh: scaffold a minimal Neovim config with lazy-workspaces.
 #
 # Usage:
