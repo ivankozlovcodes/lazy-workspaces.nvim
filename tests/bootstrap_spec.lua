@@ -521,13 +521,14 @@ describe("detect_workspaces", function()
 		H.cleanup(src)
 	end)
 
-	it("skips container subdir that has no init.lua", function()
+	it("detects empty leaf dir (no lua files) alongside workspace with init.lua", function()
 		local src = H.make_tree({
-			["lua/myconfig/common/init.lua"]        = "-- common",
-			["lua/myconfig/empty/placeholder.lua"]  = "-- not an init",
+			["lua/myconfig/common/init.lua"]     = "-- common",
+			["lua/myconfig/new/.gitkeep"]        = "",
 		})
 		local ns = detect(src .. "/lua")
-		assert.are.same({ "myconfig/common" }, ns)
+		table.sort(ns)
+		assert.are.same({ "myconfig/common", "myconfig/new" }, ns)
 		H.cleanup(src)
 	end)
 
@@ -542,8 +543,15 @@ describe("detect_workspaces", function()
 		H.cleanup(src)
 	end)
 
-	it("returns empty list when no valid workspaces found", function()
-		local src = H.make_tree({ ["lua/empty/placeholder.lua"] = "-- nothing" })
+	it("detects truly empty leaf dir as workspace (no lua files)", function()
+		local src = H.make_tree({ ["lua/new/.gitkeep"] = "" })
+		local ns = detect(src .. "/lua")
+		assert.are.same({ "new" }, ns)
+		H.cleanup(src)
+	end)
+
+	it("does not detect leaf dir with lua files as workspace (no init.lua)", function()
+		local src = H.make_tree({ ["lua/plugins/foo.lua"] = "-- spec" })
 		local ns = detect(src .. "/lua")
 		assert.are.same({}, ns)
 		H.cleanup(src)

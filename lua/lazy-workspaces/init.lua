@@ -50,8 +50,11 @@ local function detect_workspaces(lua_dir, prefix)
 				end
 				vim.list_extend(result, children)
 			else
-				-- leaf dir without init.lua — include as workspace, setup() will be skipped
-				result[#result + 1] = rel
+				-- only include truly empty dirs — marks a new workspace being scaffolded
+				-- dirs with lua files (e.g. flat config plugins/) are intentionally excluded
+				if #vim.fn.glob(d .. "/*.lua", false, true) == 0 then
+					result[#result + 1] = rel
+				end
 			end
 		end
 		::continue::
