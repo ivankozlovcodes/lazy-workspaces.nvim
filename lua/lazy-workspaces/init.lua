@@ -218,29 +218,49 @@ end
 local function apply_state(args, target_val, verb)
 	local raw = vim.trim(args.args)
 	if raw == "" then
-		vim.notify("[lazy-workspaces] usage: LazyWorkspaces" .. verb .. " <workspace>", vim.log.levels.ERROR)
+		vim.notify("[lazy-workspaces] usage: LazyWorkspaces" .. verb .. " [config::]<workspace>", vim.log.levels.ERROR)
 		return
 	end
 
 	local s = require("lazy-workspaces.state")
 	local st = s.read()
 
-	-- Search by full workspace name (workspace names may contain slashes; config names
-	-- are URLs which also contain slashes, so cfg/ws splitting is not a usable format).
+	-- Explicit config::workspace format disambiguates when workspace name is shared across configs.
+	local sep = raw:find("::", 1, true)
+	if sep then
+		local cfg_name = raw:sub(1, sep - 1)
+		local ws_name  = raw:sub(sep + 2)
+		if not st[cfg_name] then
+			vim.notify("[lazy-workspaces] config '" .. cfg_name .. "' not found in lazy-workspaces.json", vim.log.levels.ERROR)
+			return
+		end
+		if st[cfg_name][ws_name] == nil then
+			vim.notify("[lazy-workspaces] workspace '" .. ws_name .. "' not found in config '" .. cfg_name .. "'", vim.log.levels.ERROR)
+			return
+		end
+		st[cfg_name][ws_name] = target_val
+		s.write(st)
+		vim.notify(
+			"[lazy-workspaces] '" .. cfg_name .. "::" .. ws_name .. "' "
+				.. (target_val and "included" or "excluded") .. " (restart Neovim to apply)",
+			vim.log.levels.INFO
+		)
+		return
+	end
+
+	-- No :: — search all configs by workspace name.
 	local matches = find_configs_with_ws(st, raw)
 	if #matches == 0 then
-		vim.notify(
-			"[lazy-workspaces] workspace '" .. raw .. "' not found in lazy-workspaces.json",
-			vim.log.levels.ERROR
-		)
+		vim.notify("[lazy-workspaces] workspace '" .. raw .. "' not found in lazy-workspaces.json", vim.log.levels.ERROR)
 		return
 	elseif #matches > 1 then
 		table.sort(matches)
+		local suggestions = {}
+		for _, cfg in ipairs(matches) do
+			suggestions[#suggestions + 1] = cfg .. "::" .. raw
+		end
 		vim.notify(
-			"[lazy-workspaces] workspace '"
-				.. raw
-				.. "' exists in multiple configs: "
-				.. table.concat(matches, ", "),
+			"[lazy-workspaces] ambiguous workspace '" .. raw .. "' — use one of: " .. table.concat(suggestions, ", "),
 			vim.log.levels.ERROR
 		)
 		return
@@ -249,31 +269,41 @@ local function apply_state(args, target_val, verb)
 	st[matches[1]][raw] = target_val
 	s.write(st)
 	vim.notify(
-		"[lazy-workspaces] '"
-			.. raw
-			.. "' "
-			.. (target_val and "included" or "excluded")
-			.. " (restart Neovim to apply)",
+		"[lazy-workspaces] '" .. raw .. "' " .. (target_val and "included" or "excluded") .. " (restart Neovim to apply)",
 		vim.log.levels.INFO
 	)
 end
 
 --- Build tab completion for Include/Exclude commands.
---- want_val: the current state to complete (false for Include = show excluded, true for Exclude = show included)
----@param want_val boolean
+--- Completes bare workspace name when unique across configs; cfg::ws when ambiguous.
+---@param want_val boolean  false = complete excluded (for Include), true = complete included (for Exclude)
 ---@return function
 local function make_complete(want_val)
 	return function(arglead)
 		local st = require("lazy-workspaces.state").read()
-		local out = {}
-		local seen = {}
+
+		-- Count configs each workspace name appears in with the target value.
+		local ws_cfg_count = {}
 		for _, ws_map in pairs(st) do
 			if type(ws_map) == "table" then
 				for ws_name, included in pairs(ws_map) do
-					if included == want_val and not seen[ws_name] then
-						seen[ws_name] = true
-						if ws_name:sub(1, #arglead) == arglead then
-							out[#out + 1] = ws_name
+					if included == want_val then
+						ws_cfg_count[ws_name] = (ws_cfg_count[ws_name] or 0) + 1
+					end
+				end
+			end
+		end
+
+		local out = {}
+		local seen = {}
+		for cfg, ws_map in pairs(st) do
+			if type(ws_map) == "table" then
+				for ws_name, included in pairs(ws_map) do
+					if included == want_val then
+						local completion = ws_cfg_count[ws_name] > 1 and (cfg .. "::" .. ws_name) or ws_name
+						if not seen[completion] and completion:sub(1, #arglead) == arglead then
+							seen[completion] = true
+							out[#out + 1] = completion
 						end
 					end
 				end
