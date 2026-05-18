@@ -408,9 +408,15 @@ function M.setup(user_opts)
 		priority = 1000,
 		dev = lw_dev,
 	}
-	local full_spec = vim.list_extend({ self_spec }, workspace_specs)
 
 	local lazy_opts = user_opts.lazy or {}
+	local full_spec = { self_spec }
+	if lazy_opts.spec ~= nil then
+		table.insert(full_spec, lazy_opts.spec)
+		lazy_opts.spec = nil
+	end
+	table.insert(full_spec, workspace_specs)
+
 	require("lazy").setup(vim.tbl_deep_extend("force", lazy_opts, { spec = full_spec }))
 end
 
