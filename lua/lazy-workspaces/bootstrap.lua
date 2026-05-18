@@ -128,7 +128,8 @@ end
 
 ---@param out_dir string
 ---@param spec_dirs string[]?  defaults to {"plugins"} — only written when non-default
-local function write_root_init(out_dir, spec_dirs)
+---@param dev boolean?  use init_dev.lua (local plugin path, no clone)
+local function write_root_init(out_dir, spec_dirs, dev)
 	local leader = vim.g.mapleader or "\\"
 	local localleader = vim.g.maplocalleader or "\\"
 	local function q(v)
@@ -145,7 +146,8 @@ local function write_root_init(out_dir, spec_dirs)
 		specs_line = "\tspecs = { " .. table.concat(quoted, ", ") .. " },"
 	end
 
-	local template_path = _plugin_root .. "/template/init.lua"
+	local template_name = dev and "init.dev.lua" or "init.lua"
+	local template_path = _plugin_root .. "/template/" .. template_name
 	local lines = vim.fn.readfile(template_path)
 	local out = {}
 	for _, line in ipairs(lines) do
@@ -154,15 +156,10 @@ local function write_root_init(out_dir, spec_dirs)
 				out[#out + 1] = specs_line
 			end
 		else
-			line = line:gsub("__OUT_DIR__", function()
-				return out_dir
-			end)
-			line = line:gsub('"__MAPLEADER__"', function()
-				return q(leader)
-			end)
-			line = line:gsub('"__MAPLOCALLEADER__"', function()
-				return q(localleader)
-			end)
+			line = line:gsub("__OUT_DIR__", function() return out_dir end)
+			line = line:gsub('"__MAPLEADER__"', function() return q(leader) end)
+			line = line:gsub('"__MAPLOCALLEADER__"', function() return q(localleader) end)
+			line = line:gsub('"__PLUGIN_ROOT__"', function() return '"' .. _plugin_root .. '"' end)
 			out[#out + 1] = line
 		end
 	end
@@ -172,6 +169,18 @@ end
 ---@param args {args: string}
 function M.command(args)
 	local parts = vim.split(args.args, "%s+", { trimempty = true })
+
+	local dev = false
+	local filtered = {}
+	for _, p in ipairs(parts) do
+		if p == "--dev" then
+			dev = true
+		else
+			filtered[#filtered + 1] = p
+		end
+	end
+	parts = filtered
+
 	local src_dir, out_dir
 
 	if #parts == 0 then
@@ -290,8 +299,8 @@ function M.command(args)
 		results[#results + 1] = "spec dirs: " .. table.concat(spec_dirs, ", ")
 	end
 
-	write_root_init(out_dir, spec_dirs)
-	results[#results + 1] = "wrote init.lua"
+	write_root_init(out_dir, spec_dirs, dev)
+	results[#results + 1] = "wrote init.lua" .. (dev and " (dev)" or "")
 
 	local msg = "[lazy-workspaces] bootstrap → " .. out_dir .. "\n"
 	for _, r in ipairs(results) do
