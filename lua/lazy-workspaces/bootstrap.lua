@@ -116,9 +116,10 @@ end
 
 
 ---@param out_dir string
----@param spec_dirs string[]?  defaults to {"plugins"} — only written when non-default
----@param dev boolean?  use init_dev.lua (local plugin path, no clone)
-local function write_root_init(out_dir, spec_dirs, dev)
+---@param spec_dirs string[]?
+---@param dev boolean?
+---@return string[]
+local function generate_root_init(out_dir, spec_dirs, dev)
 	local leader = vim.g.mapleader or "\\"
 	local localleader = vim.g.maplocalleader or "\\"
 	local function q(v)
@@ -141,9 +142,7 @@ local function write_root_init(out_dir, spec_dirs, dev)
 	local out = {}
 	for _, line in ipairs(lines) do
 		if line:match("^%s*%-%-%s*__SPECS__%s*$") then
-			if specs_line then
-				out[#out + 1] = specs_line
-			end
+			if specs_line then out[#out + 1] = specs_line end
 		else
 			line = line:gsub("__OUT_DIR__", function() return out_dir end)
 			line = line:gsub('"__MAPLEADER__"', function() return q(leader) end)
@@ -152,7 +151,66 @@ local function write_root_init(out_dir, spec_dirs, dev)
 			out[#out + 1] = line
 		end
 	end
-	vim.fn.writefile(out, out_dir .. "/init.lua")
+	return out
+end
+
+--- Open a tab with old (left) vs new (right) init.lua in diff mode.
+--- <CR> on the right buffer writes and calls on_confirm; q cancels.
+--- Falls back to direct write in headless/non-interactive mode.
+---@param init_path string
+---@param new_lines string[]
+---@param on_confirm function
+local function show_diff(init_path, new_lines, on_confirm)
+	if vim.v.vim_did_enter == 0 then
+		vim.fn.writefile(new_lines, init_path)
+		on_confirm()
+		return
+	end
+	local old_lines = vim.fn.filereadable(init_path) == 1 and vim.fn.readfile(init_path) or {}
+
+	local old_buf = vim.api.nvim_create_buf(false, true)
+	local new_buf = vim.api.nvim_create_buf(false, true)
+
+	vim.api.nvim_buf_set_lines(old_buf, 0, -1, false, old_lines)
+	vim.api.nvim_buf_set_lines(new_buf, 0, -1, false, new_lines)
+
+	for _, buf in ipairs({ old_buf, new_buf }) do
+		vim.bo[buf].buftype = "nofile"
+		vim.bo[buf].bufhidden = "wipe"
+		vim.bo[buf].filetype = "lua"
+		vim.bo[buf].modifiable = false
+	end
+	vim.api.nvim_buf_set_name(old_buf, "init.lua [before]")
+	vim.api.nvim_buf_set_name(new_buf, "init.lua [after]")
+
+	vim.cmd("tabnew")
+	vim.api.nvim_win_set_buf(0, old_buf)
+	vim.cmd("diffthis")
+	vim.cmd("vsplit")
+	vim.api.nvim_win_set_buf(0, new_buf)
+	vim.cmd("diffthis")
+
+	local function close_diff()
+		if vim.api.nvim_buf_is_valid(old_buf) then vim.api.nvim_buf_delete(old_buf, { force = true }) end
+		if vim.api.nvim_buf_is_valid(new_buf) then vim.api.nvim_buf_delete(new_buf, { force = true }) end
+	end
+
+	local opts = { buffer = new_buf, nowait = true }
+	vim.keymap.set("n", "<CR>", function()
+		vim.fn.writefile(new_lines, init_path)
+		close_diff()
+		on_confirm()
+	end, opts)
+	vim.keymap.set("n", "q", function()
+		close_diff()
+		vim.notify("[lazy-workspaces] bootstrap cancelled", vim.log.levels.INFO)
+	end, opts)
+
+	vim.notify("[lazy-workspaces] <CR> write init.lua · q cancel", vim.log.levels.INFO)
+end
+
+local function write_root_init(out_dir, spec_dirs, dev)
+	vim.fn.writefile(generate_root_init(out_dir, spec_dirs, dev), out_dir .. "/init.lua")
 end
 
 ---@param args {args: string}
@@ -188,20 +246,6 @@ function M.command(args)
 
 	if vim.fn.isdirectory(src_dir) == 0 then
 		vim.notify("[lazy-workspaces] src not found: " .. src_dir, vim.log.levels.ERROR)
-		return
-	end
-
-	local confirm = vim.fn.confirm(
-		string.format(
-			"lazy-workspaces bootstrap\n\n  src: %s\n  out: %s\n\nCopy src → out and rewrite files. Proceed?",
-			src_dir,
-			out_dir
-		),
-		"&Yes\n&No",
-		2
-	)
-	if confirm ~= 1 then
-		vim.notify("[lazy-workspaces] bootstrap cancelled", vim.log.levels.INFO)
 		return
 	end
 
@@ -287,15 +331,20 @@ function M.command(args)
 		results[#results + 1] = "spec dirs: " .. table.concat(spec_dirs, ", ")
 	end
 
-	write_root_init(out_dir, spec_dirs, dev)
-	results[#results + 1] = "wrote init.lua" .. (dev and " (dev)" or "")
+	local new_lines = generate_root_init(out_dir, spec_dirs, dev)
+	results[#results + 1] = "init.lua" .. (dev and " (dev)" or "")
 
-	local msg = "[lazy-workspaces] bootstrap → " .. out_dir .. "\n"
-	for _, r in ipairs(results) do
-		msg = msg .. "  • " .. r .. "\n"
-	end
-	msg = msg .. "\nTest: nvim -u " .. out_dir .. "/init.lua"
-	vim.notify(msg, vim.log.levels.INFO)
+	local init_path = out_dir .. "/init.lua"
+	local summary_results = results
+
+	show_diff(init_path, new_lines, function()
+		local msg = "[lazy-workspaces] bootstrap → " .. out_dir .. "\n"
+		for _, r in ipairs(summary_results) do
+			msg = msg .. "  • " .. r .. "\n"
+		end
+		msg = msg .. "\nTest: nvim -u " .. init_path
+		vim.notify(msg, vim.log.levels.INFO)
+	end)
 end
 
 M._test = {
@@ -304,6 +353,7 @@ M._test = {
 	wrap_in_setup = wrap_in_setup,
 	transform_ns_init = transform_ns_init,
 	disable_lazy_bootstrap_files = disable_lazy_bootstrap_files,
+	generate_root_init = generate_root_init,
 	write_root_init = write_root_init,
 	migrate_flat_plugins = migrate_flat_plugins,
 	write_config_init = write_config_init,
