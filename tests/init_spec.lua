@@ -156,6 +156,27 @@ describe("collect()", function()
 		end)
 	end)
 
+	it("sets vim.g.lw.config_paths with resolved config paths", function()
+		with_state(function()
+			local root = make_workspace()
+			lw.collect({ configs = { ws1 = { source = root } } })
+			local lw_g = vim.g.lw
+			H.cleanup(root)
+			assert.is_not_nil(lw_g)
+			assert.is_true(vim.tbl_contains(lw_g.config_paths, root))
+		end)
+	end)
+
+	it("sets vim.g.lw.configs with name → path mapping", function()
+		with_state(function()
+			local root = make_workspace()
+			lw.collect({ configs = { ws1 = { source = root } } })
+			local lw_g = vim.g.lw
+			H.cleanup(root)
+			assert.are.equal(root, lw_g.configs.ws1)
+		end)
+	end)
+
 	it("adds workspace path to rtp", function()
 		with_state(function()
 			local root = make_workspace()

@@ -232,6 +232,36 @@ Tab-completes currently included workspaces.
 
 ---
 
+## Additional Customization
+
+### Config path globals
+
+After `setup()` resolves all configs, lazy-workspaces sets `vim.g.lw` with the local paths of every config:
+
+```lua
+vim.g.lw.configs       -- { config_name = local_path, ... }
+vim.g.lw.config_paths  -- { local_path, ... }  (flat list)
+```
+
+These are available inside any workspace's `M.setup()` and plugin specs. Useful for pickers that span multiple config directories:
+
+```lua
+-- lua/personal/plugins/snacks.lua
+keys = {
+  { "<leader>fe", function()
+      Snacks.picker.files({ dirs = vim.g.lw.config_paths })
+  end, desc = "Find config file" },
+}
+```
+
+For named access (e.g. when you have multiple configs and want a specific one):
+
+```lua
+vim.g.lw.configs["user/nvim.conf.d"]  -- → /home/user/.local/share/nvim/lazy-workspaces/nvim.conf.d
+```
+
+---
+
 ## Known Limitations
 
 - **Symlinks not supported.** Bootstrap descends recursively — a symlink cycle will loop infinitely. Do not use symlinks inside `lua/`.

@@ -154,6 +154,17 @@ function M.collect(opts)
 		end
 	end
 
+	-- Expose resolved config paths via vim.g.lw so workspace setup() calls can reference them.
+	-- vim.g.lw.configs      → { config_name = local_path, ... }
+	-- vim.g.lw.config_paths → { local_path, ... }  (flat list, usable as dirs = vim.g.lw.config_paths)
+	local lw_configs = {}
+	local lw_config_paths = {}
+	for _, entry in ipairs(resolved) do
+		lw_configs[entry.cfg_name] = entry.path
+		lw_config_paths[#lw_config_paths + 1] = entry.path
+	end
+	vim.g.lw = { configs = lw_configs, config_paths = lw_config_paths }
+
 	-- Reconcile JSON state: auto-include new workspaces, respect excluded, warn stale
 	local effective = state_mod.reconcile(configs_map)
 
