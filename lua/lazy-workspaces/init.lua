@@ -294,24 +294,11 @@ local function apply_state(args, target_val, verb)
 end
 
 --- Build tab completion for Include/Exclude commands.
---- Completes bare workspace name when unique across configs; cfg::ws when ambiguous.
 ---@param want_val boolean  false = complete excluded (for Include), true = complete included (for Exclude)
 ---@return function
 local function make_complete(want_val)
 	return function(arglead)
 		local st = require("lazy-workspaces.state").read()
-
-		-- Count configs each workspace name appears in with the target value.
-		local ws_cfg_count = {}
-		for _, ws_map in pairs(st) do
-			if type(ws_map) == "table" then
-				for ws_name, included in pairs(ws_map) do
-					if included == want_val then
-						ws_cfg_count[ws_name] = (ws_cfg_count[ws_name] or 0) + 1
-					end
-				end
-			end
-		end
 
 		local out = {}
 		local seen = {}
@@ -319,7 +306,7 @@ local function make_complete(want_val)
 			if type(ws_map) == "table" then
 				for ws_name, included in pairs(ws_map) do
 					if included == want_val then
-						local completion = ws_cfg_count[ws_name] > 1 and (cfg .. "::" .. ws_name) or ws_name
+						local completion = cfg .. "::" .. ws_name
 						if not seen[completion] and completion:sub(1, #arglead) == arglead then
 							seen[completion] = true
 							out[#out + 1] = completion
