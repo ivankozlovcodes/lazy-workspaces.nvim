@@ -5,14 +5,8 @@ local bootstrap = require("lazy-workspaces.bootstrap")
 -- ── helpers ───────────────────────────────────────────────────────────────────
 
 local function run_bootstrap(src, out)
-	local confirm_stub = stub(vim.fn, "confirm")
-	confirm_stub.returns(1)
-
 	local notify_stub = stub(vim, "notify")
-
 	bootstrap.command({ args = src .. " " .. out })
-
-	confirm_stub:revert()
 	notify_stub:revert()
 end
 
