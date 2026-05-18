@@ -49,6 +49,9 @@ local function detect_workspaces(lua_dir, prefix)
 					)
 				end
 				vim.list_extend(result, children)
+			else
+				-- leaf dir without init.lua — include as workspace, setup() will be skipped
+				result[#result + 1] = rel
 			end
 		end
 		::continue::
@@ -197,6 +200,7 @@ function M.collect(opts)
 
 				local ws_init = entry.path .. "/lua/" .. ws_name .. "/init.lua"
 				vim.schedule(function()
+					if vim.fn.filereadable(ws_init) == 0 then return end
 					local chunk, load_err = loadfile(ws_init)
 					if not chunk then
 						vim.notify(

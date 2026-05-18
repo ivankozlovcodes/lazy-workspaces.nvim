@@ -90,8 +90,11 @@ function M.check()
 			local on_disk = {}
 			for _, ws in ipairs(ws_names) do
 				on_disk[ws] = true
+				local has_init = vim.fn.filereadable(local_path .. "/lua/" .. ws .. "/init.lua") == 1
 				if ws_state[ws] == false then
 					h.info(fmt:format("[excluded]", ws))
+				elseif not has_init then
+					h.warn(ws .. " - no init.lua")
 				else
 					h.info(fmt:format("OK", ws))
 					for _, sd in ipairs(spec_dirs) do
