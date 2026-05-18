@@ -2,32 +2,25 @@
 
 Split your Neovim config into modular **workspaces** — each with its own options, keymaps, and plugins — loaded automatically by [lazy.nvim](https://github.com/folke/lazy.nvim).
 
-Useful when you maintain one config repo shared across contexts (personal, work, machine-specific) and want to enable only the relevant parts per environment.
+## Philosophy
+
+Most Neovim configs grow into monoliths: everything merged into one repo, enabled everywhere, managed by commenting lines in and out. lazy-workspaces treats your config like a monorepo of independent modules.
+
+Each **workspace** is a self-contained folder with its own `init.lua` (options, keymaps, autocmds) and `plugins/` directory (lazy.nvim specs). Workspaces can live in one repo or many, on a local path or a remote git repo. You include or exclude them per-machine without touching the source.
+
+Which workspaces are active is tracked in `lazy-workspaces.json` — separate from the workspace code itself, kept out of your config repo, managed via commands.
 
 ## Requirements
 
 - Neovim 0.10+
-- [lazy.nvim](https://github.com/folke/lazy.nvim)
 
 ---
 
 ## Getting Started
 
-### Option A — Add to existing config
+The fastest path: run `:LazyWorkspacesBootstrap` from your existing Neovim session. It migrates your current config to lazy-workspaces format and writes the result to `/tmp/nvim`.
 
-Add `lazy-workspaces` to your lazy.nvim spec:
-
-```lua
-{ "ivankozlovcodes/lazy-workspaces.nvim", lazy = false, opts = {} }
-```
-
-Open Neovim — lazy installs the plugin. Then migrate your config:
-
-```vim
-:LazyWorkspacesBootstrap
-```
-
-See [Bootstrap](#bootstrap) for what this does. Test the result:
+Test it:
 
 ```bash
 nvim -u /tmp/nvim/init.lua
@@ -36,61 +29,36 @@ nvim -u /tmp/nvim/init.lua
 Happy? Move it into place:
 
 ```bash
-mv /tmp/nvim ~/.config/nvim
+mv ~/.config/nvim ~/.config/nvim.bak && mv /tmp/nvim ~/.config/nvim
 ```
 
-> **Warning:** This overwrites `~/.config/nvim` and cannot be undone. Back up first — or better yet, manage your config with git. lazy-workspaces [supports git URLs](#configuration), so your workspaces can live in a repo and be pulled automatically on every start.
-
----
-
-### Option B — Lazy to type?
-
-Run the setup script:
-
-```bash
-curl -s https://raw.githubusercontent.com/ivankozlovcodes/lazy-workspaces.nvim/main/scripts/new-config.sh | bash
-```
-
-Open it:
-
-```bash
-nvim -u /tmp/nvim/init.lua
-```
-
-Migrate your config:
-
-```vim
-:LazyWorkspacesBootstrap
-```
-
-Test and move into place as in Option A.
+> **Warning:** Back up first, or keep your config in git. lazy-workspaces supports git URLs — your workspaces can live in a repo and be pulled automatically on every start.
 
 ---
 
 ## Workspace Structure
 
-Each workspace is a folder under `lua/` with an `init.lua` exposing `M.setup()` and a `plugins/` directory with lazy.nvim specs:
+Each workspace is a folder under `lua/` with an `init.lua` exposing `M.setup()` and one or more spec directories (default: `plugins/`):
 
 ```
 nvim.conf.d/
   lua/
     common/
-      init.lua        -- M.setup(): options, keymaps, autocmds
+      init.lua        ← M.setup(): options, keymaps, autocmds
       plugins/
         treesitter.lua
         blink.lua
-        ...
     personal/
       init.lua
       plugins/
         lazygit.lua
-        ...
     work/
       init.lua
       plugins/
+        copilot.lua
 ```
 
-`init.lua` example:
+`init.lua` shape:
 
 ```lua
 local M = {}
@@ -103,7 +71,7 @@ end
 return M
 ```
 
-Plugin spec files follow standard lazy.nvim format:
+Plugin spec files follow the standard lazy.nvim format:
 
 ```lua
 -- lua/common/plugins/treesitter.lua
@@ -118,45 +86,10 @@ return {
 
 ## Configuration
 
-`collect()` resolves each workspace source, scans `plugins/*.lua` files, and returns a flat list of lazy.nvim specs.
+`setup(opts)` is the single entry point. It bootstraps lazy.nvim, resolves workspace sources, loads specs, and schedules each workspace's `M.setup()`. You do not call `lazy.setup()` yourself.
 
 ```lua
-workspace_specs = require("lazy-workspaces").collect({
-  workspaces = {
-    {
-      url    = "git@github.com:ivankozlovcodes/nvim.conf.d.git",
-      enable = { "common", "personal" },
-    },
-  },
-})
-```
-
-**URL schemes:**
-
-| Scheme | Behavior |
-|---|---|
-| `file://~/path` | Load from local directory |
-| `https://` / `git@` | Clone on first start; pull on subsequent starts |
-
-**Offline / first-run fallback:** if the lazy-workspaces clone fails (no internet), `workspace_specs` stays empty and lazy installs it on the next run.
-
-Full `init.lua` example:
-
-```lua
-vim.g.mapleader = " "
-vim.g.maplocalleader = " "
-
--- Bootstrap lazy.nvim
-local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
-if not (vim.uv or vim.loop).fs_stat(lazypath) then
-  vim.fn.system({
-    "git", "clone", "--filter=blob:none", "--branch=stable",
-    "https://github.com/folke/lazy.nvim.git", lazypath,
-  })
-end
-vim.opt.rtp:prepend(lazypath)
-
--- Bootstrap lazy-workspaces
+-- ~/.config/nvim/init.lua
 local lwpath = vim.fn.stdpath("data") .. "/lazy/lazy-workspaces.nvim"
 if not (vim.uv or vim.loop).fs_stat(lwpath) then
   vim.fn.system({
@@ -166,63 +99,169 @@ if not (vim.uv or vim.loop).fs_stat(lwpath) then
 end
 vim.opt.rtp:prepend(lwpath)
 
-local workspace_specs = {}
-if (vim.uv or vim.loop).fs_stat(lwpath) then
-  workspace_specs = require("lazy-workspaces").collect({
-    workspaces = {
-      -- TODO: replace with real setup example
-      {
-        url    = "file://~/git/nvim.conf.d",
-        enable = { "common", "personal" },
-      },
-      {
-        url    = "git@github.com:user/work-nvim.git",
-        branch = "stable",
-        enable = { "work" },
-      },
-    },
-  })
-end
-
-require("lazy").setup({
-  spec = vim.list_extend(workspace_specs, {
-    { "ivankozlovcodes/lazy-workspaces.nvim", lazy = false, opts = {} },
-  }),
-  change_detection = { notify = false },
+require("lazy-workspaces").setup({
+  configs = {
+    personal = { source = "/home/user/git/nvim.conf.d" },
+    work     = { source = "git@github.com:corp/work-nvim.git", branch = "stable" },
+  },
 })
+```
+
+### `configs`
+
+Maps a config name to a workspace source. The name becomes the key in `lazy-workspaces.json`.
+
+```lua
+configs = {
+  -- explicit name
+  personal = { source = "/home/user/git/nvim.conf.d" },
+  -- array style — name derived from source
+  { source = "git@github.com:user/nvim.conf.d.git" },
+}
+```
+
+**URL schemes:**
+
+| URL | Behavior |
+|---|---|
+| `/abs/path` or `~/rel/path` | Load from local directory |
+| `git@github.com:user/repo.git` | Clone on first start, pull on subsequent starts |
+| `https://github.com/user/repo` | Same |
+
+**Name derivation** (array-style configs without explicit name):
+
+| URL | Derived name |
+|---|---|
+| `git@github.com:user/repo.git` | `user/repo` |
+| `https://github.com/user/repo.git` | `user/repo` |
+
+### `specs`
+
+Subdirectory names to scan for lazy.nvim spec files. Default: `{ "plugins" }`.
+
+```lua
+specs = { "plugins", "themes" }
+```
+
+`:LazyWorkspacesBootstrap` auto-detects all subdirectories containing `.lua` files inside each workspace and populates `specs` accordingly. **Every `.lua` file in a listed directory is executed and its return value passed to `lazy.setup()` as a spec** — so only list directories that exclusively contain lazy.nvim spec files. Remove any auto-detected entries that point to non-spec directories.
+
+### `lazy`
+
+Options forwarded verbatim to `lazy.setup()`.
+
+```lua
+lazy = {
+  change_detection = { notify = false },
+  rocks = { hererocks = true },
+  dev = { path = "~/git", fallback = true },
+}
 ```
 
 ---
 
-## Bootstrap
+## lazy-workspaces.json
 
-What `:LazyWorkspacesBootstrap` does to your config:
+Tracks which workspaces are active. Created automatically at `stdpath("config")/lazy-workspaces.json` on first launch.
 
-- Detects workspaces (each `lua/<name>/` folder with `init.lua`)
-- Renames `lazy/` → `plugins/` inside each workspace
-- Wraps `init.lua` body in `M.setup()`
-- Moves any existing lazy bootstrap file (e.g. `lazy_init.lua`) to `*.bak`
+```json
+{
+  "user/repo": {
+    "common": true,
+    "personal": true,
+    "work": false
+  }
+}
+```
+
+- Workspaces discovered on disk for the first time are **auto-included** (`true`)
+- Excluded workspaces (`false`) are skipped — their specs and `setup()` are not loaded
+- Stale entries (workspace removed from disk) emit a warning but are kept
+- Can be managed via commands below. As well by hand.
+
+---
+
+## Commands
+
+### `:LazyWorkspacesBootstrap [src] [out] [--dev]`
+
+Migrates an existing config to lazy-workspaces format.
+
+What it does:
+- Detects workspaces under `lua/` (folders containing `init.lua`)
+- Wraps `init.lua` content in `M.setup()`
+- Moves any existing lazy bootstrap files (e.g. `lazy_init.lua`) to `*.bak`
+- Detects subdirectories with `.lua` files and populates `specs` in the generated `init.lua`
 - Generates a new root `init.lua` wired to `lazy-workspaces`
+
+Defaults: `src = stdpath("config")`, `out = /tmp/nvim`.
+
+`--dev` — generates `init.lua` using a local plugin path instead of GitHub clone. Useful when developing lazy-workspaces itself.
+
+### `:LazyWorkspacesInclude <workspace>`
+
+Marks a workspace as included in `lazy-workspaces.json`. Takes effect on next restart.
+
+```vim
+:LazyWorkspacesInclude work
+:LazyWorkspacesInclude myconfig/common
+```
+
+Tab-completes currently excluded workspaces.
+
+### `:LazyWorkspacesExclude <workspace>`
+
+Marks a workspace as excluded. Takes effect on next restart.
+
+```vim
+:LazyWorkspacesExclude work
+:LazyWorkspacesExclude myconfig/personal
+```
+
+Tab-completes currently included workspaces.
 
 ---
 
 ## How It Works
 
-1. `init.lua` bootstraps lazy-workspaces from `stdpath("data")/lazy/` (cloning if needed)
-2. `collect()` resolves workspace sources, adds them to `runtimepath`, and scans each `plugins/` directory for lazy.nvim specs
-3. The returned spec list is passed directly to `lazy.setup()` — lazy handles installation, updates, and key/event/command triggers natively
-4. After lazy's startup completes, `M.setup()` is called for each workspace (options, keymaps, autocmds)
+1. `init.lua` bootstraps lazy-workspaces from `stdpath("data")/lazy/` (clones if needed)
+2. `setup()` resolves each config URL → local path (clones/pulls git repos as needed)
+3. Workspaces are detected recursively under each config's `lua/` directory
+4. `lazy-workspaces.json` is reconciled: new workspaces auto-included, excluded ones skipped, stale ones warned
+5. Spec files from each active workspace's spec directories are collected and passed to `lazy.setup()`
+6. After lazy startup, `M.setup()` is called for each active workspace
+
+---
+
+## Additional Customization
+
+### Config path globals
+
+After `setup()` resolves all configs, lazy-workspaces sets `vim.g.lw` with the local paths of every config:
+
+```lua
+vim.g.lw.configs       -- { config_name = local_path, ... }
+vim.g.lw.config_paths  -- { local_path, ... }  (flat list)
+```
+
+These are available inside any workspace's `M.setup()` and plugin specs. Useful for pickers that span multiple config directories:
+
+```lua
+-- lua/personal/plugins/snacks.lua
+keys = {
+  { "<leader>fe", function()
+      Snacks.picker.files({ dirs = vim.g.lw.config_paths })
+  end, desc = "Find config file" },
+}
+```
+
+For named access (e.g. when you have multiple configs and want a specific one):
+
+```lua
+vim.g.lw.configs["user/nvim.conf.d"]  -- → /home/user/.local/share/nvim/lazy-workspaces/nvim.conf.d
+```
 
 ---
 
 ## Known Limitations
 
-- **Symlinks in workspace directories are not supported.** Bootstrap's namespace detection descends into subdirectories recursively. A symlink that creates a cycle (e.g. `lua/foo/bar → lua/foo`) will cause an infinite loop. Do not use symlinks inside your `lua/` directory.
-
----
-
-## Roadmap
-
-- [ ] `:WorkspaceEnable` / `:WorkspaceDisable` / `:WorkspaceRefresh` commands
-- [ ] `:Install <workspace> <author/plugin>` — generate plugin spec file in workspace
-- [x] Auto-install newly injected plugins without manual `:Lazy install`
+- **Symlinks not supported.** Bootstrap descends recursively — a symlink cycle will loop infinitely. Do not use symlinks inside `lua/`.
