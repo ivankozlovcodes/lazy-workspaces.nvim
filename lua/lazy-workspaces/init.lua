@@ -1,5 +1,7 @@
 local M = {}
 
+M.version = "0.1.0"
+
 local _self_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
 local _opts = nil
 
@@ -106,10 +108,14 @@ function M.collect(opts)
 	--   https://github.com/user/repo  → user/repo
 	local function name_from_source(source)
 		local ssh_path = source:match("^git@[^:]+:(.+)$")
-		if ssh_path then return ssh_path:gsub("%.git$", "") end
+		if ssh_path then
+			return ssh_path:gsub("%.git$", "")
+		end
 		if source:match("^https?://") then
 			local two_seg = source:match("([^/]+/[^/]+)$")
-			if two_seg then return two_seg:gsub("%.git$", "") end
+			if two_seg then
+				return two_seg:gsub("%.git$", "")
+			end
 		end
 		return source
 	end
@@ -203,7 +209,9 @@ function M.collect(opts)
 
 				local ws_init = entry.path .. "/lua/" .. ws_name .. "/init.lua"
 				vim.schedule(function()
-					if vim.fn.filereadable(ws_init) == 0 then return end
+					if vim.fn.filereadable(ws_init) == 0 then
+						return
+					end
 					local chunk, load_err = loadfile(ws_init)
 					if not chunk then
 						vim.notify(
@@ -248,20 +256,31 @@ local function apply_state(args, target_val, verb)
 	local sep = raw:find("::", 1, true)
 	if sep then
 		local cfg_name = raw:sub(1, sep - 1)
-		local ws_name  = raw:sub(sep + 2)
+		local ws_name = raw:sub(sep + 2)
 		if not st[cfg_name] then
-			vim.notify("[lazy-workspaces] config '" .. cfg_name .. "' not found in lazy-workspaces.json", vim.log.levels.ERROR)
+			vim.notify(
+				"[lazy-workspaces] config '" .. cfg_name .. "' not found in lazy-workspaces.json",
+				vim.log.levels.ERROR
+			)
 			return
 		end
 		if st[cfg_name][ws_name] == nil then
-			vim.notify("[lazy-workspaces] workspace '" .. ws_name .. "' not found in config '" .. cfg_name .. "'", vim.log.levels.ERROR)
+			vim.notify(
+				"[lazy-workspaces] workspace '" .. ws_name .. "' not found in config '" .. cfg_name .. "'",
+				vim.log.levels.ERROR
+			)
 			return
 		end
 		st[cfg_name][ws_name] = target_val
 		s.write(st)
 		vim.notify(
-			"[lazy-workspaces] '" .. cfg_name .. "::" .. ws_name .. "' "
-				.. (target_val and "included" or "excluded") .. " (restart Neovim to apply)",
+			"[lazy-workspaces] '"
+				.. cfg_name
+				.. "::"
+				.. ws_name
+				.. "' "
+				.. (target_val and "included" or "excluded")
+				.. " (restart Neovim to apply)",
 			vim.log.levels.INFO
 		)
 		return
@@ -270,7 +289,10 @@ local function apply_state(args, target_val, verb)
 	-- No :: — search all configs by workspace name.
 	local matches = find_configs_with_ws(st, raw)
 	if #matches == 0 then
-		vim.notify("[lazy-workspaces] workspace '" .. raw .. "' not found in lazy-workspaces.json", vim.log.levels.ERROR)
+		vim.notify(
+			"[lazy-workspaces] workspace '" .. raw .. "' not found in lazy-workspaces.json",
+			vim.log.levels.ERROR
+		)
 		return
 	elseif #matches > 1 then
 		table.sort(matches)
@@ -288,7 +310,11 @@ local function apply_state(args, target_val, verb)
 	st[matches[1]][raw] = target_val
 	s.write(st)
 	vim.notify(
-		"[lazy-workspaces] '" .. raw .. "' " .. (target_val and "included" or "excluded") .. " (restart Neovim to apply)",
+		"[lazy-workspaces] '"
+			.. raw
+			.. "' "
+			.. (target_val and "included" or "excluded")
+			.. " (restart Neovim to apply)",
 		vim.log.levels.INFO
 	)
 end

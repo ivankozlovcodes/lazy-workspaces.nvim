@@ -22,6 +22,8 @@ function M.check()
 	-- ── Prerequisites (one line each) ─────────────────────────────────────────
 	h.start("lazy-workspaces")
 
+	h.info("version: " .. (lw.version or "unknown"))
+
 	if vim.fn.has("nvim-0.10") == 0 then
 		h.error("Neovim >= 0.10 required")
 	end
