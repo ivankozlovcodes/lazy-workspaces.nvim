@@ -1,6 +1,6 @@
 local M = {}
 
-M.version = "0.1.1"
+M.version = "0.1.2"
 
 local _self_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
 local _opts = nil
