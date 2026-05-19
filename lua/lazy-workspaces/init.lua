@@ -1,6 +1,6 @@
 local M = {}
 
-M.version = "0.1.0"
+M.version = "0.1.1"
 
 local _self_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
 local _opts = nil
@@ -120,17 +120,36 @@ function M.collect(opts)
 		return source
 	end
 
-	-- Normalize configs: derive name from source for numeric keys (array-style configs)
-	local named_configs = {}
-	for k, v in pairs(opts.configs or {}) do
-		local name
-		if type(k) == "string" then
-			name = k
-		else
-			local source = type(v) == "string" and v or (type(v) == "table" and v.source or tostring(k))
-			name = name_from_source(source)
+	-- Normalize configs to an ordered list of resolved configs
+	local normalized_configs = {}
+	local is_array = false
+	if opts.configs and opts.configs[1] ~= nil then
+		is_array = true
+	end
+
+	if is_array then
+		for i = 1, #opts.configs do
+			local v = opts.configs[i]
+			local name, source
+			if type(v) == "table" then
+				name = v.name or name_from_source(v.source)
+				source = v
+			else
+				name = name_from_source(v)
+				source = v
+			end
+			table.insert(normalized_configs, { name = name, value = source })
 		end
-		named_configs[name] = v
+	else
+		-- Dictionary style: sort keys to make it deterministic (alphabetical)
+		local keys = {}
+		for k, _ in pairs(opts.configs or {}) do
+			table.insert(keys, k)
+		end
+		table.sort(keys)
+		for _, k in ipairs(keys) do
+			table.insert(normalized_configs, { name = k, value = opts.configs[k] })
+		end
 	end
 
 	-- Pass 1: resolve each config URL → local path, scan workspace dirs on disk
@@ -138,7 +157,9 @@ function M.collect(opts)
 	local configs_map = {} -- { cfg_name = [ws_names] } for reconcile
 	local seen_paths = {}
 
-	for cfg_name, value in pairs(named_configs) do
+	for _, cfg in ipairs(normalized_configs) do
+		local cfg_name = cfg.name
+		local value = cfg.value
 		local url, branch = parse_source(value)
 		local ok, path = pcall(resolver.resolve, url, branch)
 		if not ok then
@@ -408,9 +429,15 @@ function M.setup(user_opts)
 		priority = 1000,
 		dev = lw_dev,
 	}
-	local full_spec = vim.list_extend({ self_spec }, workspace_specs)
 
 	local lazy_opts = user_opts.lazy or {}
+	local full_spec = { self_spec }
+	if lazy_opts.spec ~= nil then
+		table.insert(full_spec, lazy_opts.spec)
+		lazy_opts.spec = nil
+	end
+	table.insert(full_spec, workspace_specs)
+
 	require("lazy").setup(vim.tbl_deep_extend("force", lazy_opts, { spec = full_spec }))
 end
 
