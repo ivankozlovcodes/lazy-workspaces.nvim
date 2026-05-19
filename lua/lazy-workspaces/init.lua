@@ -4,6 +4,7 @@ M.version = "0.1.1"
 
 local _self_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
 local _opts = nil
+local _scan_cache = nil -- populated by collect(); { cfg_name = { path, workspaces, specs } }
 
 ---@class WorkspaceSource
 ---@field source string     local path (absolute or ~) or git URL (git@, https://)
@@ -16,27 +17,48 @@ local _opts = nil
 ---@class LazyWorkspacesSetupOpts : LazyWorkspacesOpts
 ---@field lazy table?  opts forwarded verbatim to lazy.setup() (rocks, change_detection, etc.)
 
---- Recursively find workspace folders (dirs containing init.lua) under lua_dir.
---- Returns slash-separated relative names: "ws" or "myconfig/common".
+--- Recursively scan all subdirectories under lua_dir. No init.lua check — pure structure.
 ---@param lua_dir string
 ---@param prefix string?
----@return string[]
-local function detect_workspaces(lua_dir, prefix)
+---@return table[]  list of { name, rel, path, kids }
+local function scan_dir(lua_dir, prefix)
 	prefix = prefix or ""
-	local result = {}
+	local entries = {}
 	for _, dir in ipairs(vim.fn.glob(lua_dir .. "/*/", false, true)) do
 		local name = dir:match("/([^/]+)/$")
 		if not name then
 			goto continue
 		end
 		local rel = prefix == "" and name or (prefix .. "/" .. name)
-		local d = dir:gsub("/$", "")
-		if vim.fn.filereadable(d .. "/init.lua") == 1 then
-			result[#result + 1] = rel
-		else
-			local children = detect_workspaces(d, rel)
-			if #children > 0 then
-				local loose = vim.fn.glob(d .. "/*.lua", false, true)
+		local abs = dir:gsub("/$", "")
+		entries[#entries + 1] = { name = name, rel = rel, path = abs, kids = scan_dir(abs, rel) }
+		::continue::
+	end
+	return entries
+end
+
+--- Classify scanned entries into workspaces and root-level spec dirs.
+--- spec_dir_set: set of top-level dir names treated as spec dirs (not workspaces).
+--- is_root: true for the top-level call (enables root spec dir detection).
+---@return table  { workspaces: string[], specs: table[] }
+local function classify_dirs(entries, spec_dir_set, is_root)
+	if is_root == nil then
+		is_root = true
+	end
+	local workspaces = {}
+	local specs = {}
+
+	for _, e in ipairs(entries) do
+		local has_init = vim.fn.filereadable(e.path .. "/init.lua") == 1
+
+		if is_root and spec_dir_set[e.name] then
+			specs[#specs + 1] = { name = e.name, path = e.path, via_init = has_init }
+		elseif has_init then
+			workspaces[#workspaces + 1] = e.rel
+		elseif #e.kids > 0 then
+			local child = classify_dirs(e.kids, spec_dir_set, false)
+			if #child.workspaces > 0 then
+				local loose = vim.fn.glob(e.path .. "/*.lua", false, true)
 				if #loose > 0 then
 					local names = {}
 					for _, f in ipairs(loose) do
@@ -44,27 +66,33 @@ local function detect_workspaces(lua_dir, prefix)
 					end
 					vim.notify(
 						"[lazy-workspaces] container '"
-							.. rel
+							.. e.rel
 							.. "' has loose files (not loaded as workspaces): "
 							.. table.concat(names, ", "),
 						vim.log.levels.WARN
 					)
 				end
-				vim.list_extend(result, children)
-			else
-				-- only include truly empty dirs — marks a new workspace being scaffolded
-				-- dirs with lua files (e.g. flat config plugins/) are intentionally excluded
-				if #vim.fn.glob(d .. "/*.lua", false, true) == 0 then
-					result[#result + 1] = rel
-				end
+				vim.list_extend(workspaces, child.workspaces)
+			elseif #vim.fn.glob(e.path .. "/*.lua", false, true) == 0 then
+				workspaces[#workspaces + 1] = e.rel
 			end
+		elseif #vim.fn.glob(e.path .. "/*.lua", false, true) == 0 then
+			workspaces[#workspaces + 1] = e.rel
 		end
-		::continue::
 	end
-	return result
+
+	return { workspaces = workspaces, specs = specs }
 end
 
-M.detect_workspaces = detect_workspaces
+function M._get_scan_cache()
+	return _scan_cache
+end
+
+--- Compatibility: return workspace rel-paths under lua_dir (no spec dir exclusions).
+--- Used by bootstrap.lua.
+function M.detect_workspaces(lua_dir)
+	return classify_dirs(scan_dir(lua_dir), {}).workspaces
+end
 
 --- Extract source and branch from a config value.
 ---@param value string|WorkspaceSource
@@ -141,14 +169,8 @@ function M.collect(opts)
 			table.insert(normalized_configs, { name = name, value = source })
 		end
 	else
-		-- Dictionary style: sort keys to make it deterministic (alphabetical)
-		local keys = {}
-		for k, _ in pairs(opts.configs or {}) do
-			table.insert(keys, k)
-		end
-		table.sort(keys)
-		for _, k in ipairs(keys) do
-			table.insert(normalized_configs, { name = k, value = opts.configs[k] })
+		for k, v in pairs(opts.configs or {}) do
+			table.insert(normalized_configs, { name = k, value = v })
 		end
 	end
 
@@ -157,9 +179,16 @@ function M.collect(opts)
 	local configs_map = {} -- { cfg_name = [ws_names] } for reconcile
 	local seen_paths = {}
 
-	for _, cfg in ipairs(normalized_configs) do
-		local cfg_name = cfg.name
-		local value = cfg.value
+	local spec_dir_set = {}
+	for _, s in ipairs(opts.specs or { "plugins" }) do
+		spec_dir_set[s] = true
+	end
+
+	_scan_cache = {}
+
+	for _, entry in ipairs(normalized_configs) do
+		local cfg_name = entry.name
+		local value = entry.value
 		local url, branch = parse_source(value)
 		local ok, path = pcall(resolver.resolve, url, branch)
 		if not ok then
@@ -180,7 +209,46 @@ function M.collect(opts)
 				end
 			end
 
-			local ws_names = detect_workspaces(path .. "/lua")
+			local classified = classify_dirs(scan_dir(path .. "/lua"), spec_dir_set)
+			_scan_cache[cfg_name] = {
+				path = path,
+				workspaces = classified.workspaces,
+				specs = classified.specs,
+			}
+
+			for _, ns in ipairs(classified.specs) do
+				if ns.via_init then
+					local chunk, load_err = loadfile(ns.path .. "/init.lua")
+					if not chunk then
+						vim.notify(
+							"[lazy-workspaces] failed to load spec " .. ns.path .. "/init.lua: " .. tostring(load_err),
+							vim.log.levels.WARN
+						)
+					else
+						local ok2, spec = pcall(chunk)
+						if ok2 and type(spec) == "table" then
+							specs[#specs + 1] = spec
+						end
+					end
+				else
+					for _, file in ipairs(vim.fn.glob(ns.path .. "/*.lua", false, true)) do
+						local chunk, load_err = loadfile(file)
+						if not chunk then
+							vim.notify(
+								"[lazy-workspaces] failed to load neighbor spec " .. init .. ": " .. tostring(load_err),
+								vim.log.levels.WARN
+							)
+						else
+							local ok2, spec = pcall(chunk)
+							if ok2 and type(spec) == "table" then
+								specs[#specs + 1] = spec
+							end
+						end
+					end
+				end
+			end
+
+			local ws_names = classified.workspaces
 			if #ws_names > 0 then
 				resolved[#resolved + 1] = { cfg_name = cfg_name, path = path, ws_names = ws_names }
 				configs_map[cfg_name] = ws_names

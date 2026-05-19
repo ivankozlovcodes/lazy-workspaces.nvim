@@ -37,4 +37,12 @@ function H.content_lacks(path, pattern)
   return not H.content_has(path, pattern)
 end
 
+-- Build lw.collect args from a temp root and optional fixture opts.
+-- opts: table with keys like `specs` (mirrors lw.setup opts, minus configs).
+function H.collect_args(root, opts)
+  local args = vim.deepcopy(opts or {})
+  args.configs = { cfg1 = { source = root } }
+  return args
+end
+
 return H

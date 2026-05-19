@@ -2,19 +2,16 @@ local H = require("tests.helpers")
 local state = require("lazy-workspaces.state")
 local lw = require("lazy-workspaces")
 
--- ── helpers ───────────────────────────────────────────────────────────────────
-
-local function make_workspace(extra_files)
-	local files = {
-		["lua/mws/init.lua"] = "local M = {}\nfunction M.setup() end\nreturn M",
-	}
-	if extra_files then
-		for k, v in pairs(extra_files) do
-			files[k] = v
-		end
-	end
-	return H.make_tree(files)
-end
+local fx = {
+	simple       = require("tests.fixtures.workspaces.simple"),
+	with_plugins = require("tests.fixtures.workspaces.with_plugins"),
+	multi        = require("tests.fixtures.workspaces.multi"),
+	nested       = require("tests.fixtures.workspaces.nested"),
+	custom_spec  = require("tests.fixtures.workspaces.custom_spec"),
+	neighbor_spec_no_init   = require("tests.fixtures.workspaces.neighbor_spec_no_init"),
+	neighbor_workspace      = require("tests.fixtures.workspaces.neighbor_workspace"),
+	neighbor_spec_with_init = require("tests.fixtures.workspaces.neighbor_spec_with_init"),
+}
 
 local function with_state(fn)
 	local tmp = vim.fn.tempname() .. ".json"
@@ -48,6 +45,8 @@ end)
 -- ── M.collect() ──────────────────────────────────────────────────────────────
 
 describe("collect()", function()
+	-- ── error handling ──────────────────────────────────────────────────────
+
 	it("returns empty list when workspaces is nil", function()
 		with_state(function()
 			local specs = lw.collect({})
@@ -67,9 +66,7 @@ describe("collect()", function()
 			local errored = false
 			local orig = vim.notify
 			vim.notify = function(_, level)
-				if level == vim.log.levels.ERROR then
-					errored = true
-				end
+				if level == vim.log.levels.ERROR then errored = true end
 			end
 			local specs = lw.collect({ configs = { bad = { source = "/nonexistent/path/xyz" } } })
 			vim.notify = orig
@@ -78,88 +75,21 @@ describe("collect()", function()
 		end)
 	end)
 
+	-- ── simple: single workspace, no plugins dir ────────────────────────────
+
 	it("returns empty specs when workspace has no plugins/ dir", function()
 		with_state(function()
-			local root = make_workspace()
-			local specs = lw.collect({ configs = { ws1 = { source = root } } })
+			local root = H.make_tree(fx.simple.tree)
+			local specs = lw.collect({ configs = { cfg1 = { source = root } } })
 			H.cleanup(root)
 			assert.are.same({}, specs)
-		end)
-	end)
-
-	it("returns specs from workspace plugins/ dir", function()
-		with_state(function()
-			local root = make_workspace({
-				["lua/mws/plugins/foo.lua"] = "return { 'foo/bar', opts = {} }",
-			})
-			local specs = lw.collect({ configs = { ws1 = { source = root } } })
-			H.cleanup(root)
-			assert.are.equal(1, #specs)
-		end)
-	end)
-
-	it("collects multiple spec files from plugins/", function()
-		with_state(function()
-			local root = make_workspace({
-				["lua/mws/plugins/foo.lua"] = "return { 'foo/bar' }",
-				["lua/mws/plugins/baz.lua"] = "return { 'baz/qux' }",
-			})
-			local specs = lw.collect({ configs = { ws1 = { source = root } } })
-			H.cleanup(root)
-			assert.are.equal(2, #specs)
-		end)
-	end)
-
-	it("skips malformed spec files with WARN", function()
-		with_state(function()
-			local root = make_workspace({
-				["lua/mws/plugins/bad.lua"] = "this is not valid lua %%%",
-				["lua/mws/plugins/good.lua"] = "return { 'ok/plugin' }",
-			})
-			local warned = false
-			local orig = vim.notify
-			vim.notify = function(_, level)
-				if level == vim.log.levels.WARN then
-					warned = true
-				end
-			end
-			local specs = lw.collect({ configs = { ws1 = { source = root } } })
-			vim.notify = orig
-			H.cleanup(root)
-			assert.is_true(warned)
-			assert.are.equal(1, #specs)
-		end)
-	end)
-
-	it("excludes workspace excluded in state", function()
-		with_state(function()
-			local root = make_workspace({
-				["lua/mws/plugins/foo.lua"] = "return { 'foo/bar' }",
-			})
-			-- pre-write state with mws excluded
-			state.write({ ws1 = { mws = false } })
-			local specs = lw.collect({ configs = { ws1 = { source = root } } })
-			H.cleanup(root)
-			assert.are.same({}, specs)
-		end)
-	end)
-
-	it("includes workspace included in state", function()
-		with_state(function()
-			local root = make_workspace({
-				["lua/mws/plugins/foo.lua"] = "return { 'foo/bar' }",
-			})
-			state.write({ ws1 = { mws = true } })
-			local specs = lw.collect({ configs = { ws1 = { source = root } } })
-			H.cleanup(root)
-			assert.are.equal(1, #specs)
 		end)
 	end)
 
 	it("sets vim.g.lw.config_paths with resolved config paths", function()
 		with_state(function()
-			local root = make_workspace()
-			lw.collect({ configs = { ws1 = { source = root } } })
+			local root = H.make_tree(fx.simple.tree)
+			lw.collect({ configs = { cfg1 = { source = root } } })
 			local lw_g = vim.g.lw
 			H.cleanup(root)
 			assert.is_not_nil(lw_g)
@@ -169,18 +99,18 @@ describe("collect()", function()
 
 	it("sets vim.g.lw.configs with name → path mapping", function()
 		with_state(function()
-			local root = make_workspace()
-			lw.collect({ configs = { ws1 = { source = root } } })
+			local root = H.make_tree(fx.simple.tree)
+			lw.collect({ configs = { cfg1 = { source = root } } })
 			local lw_g = vim.g.lw
 			H.cleanup(root)
-			assert.are.equal(root, lw_g.configs.ws1)
+			assert.are.equal(root, lw_g.configs.cfg1)
 		end)
 	end)
 
 	it("adds workspace path to rtp", function()
 		with_state(function()
-			local root = make_workspace()
-			lw.collect({ configs = { ws1 = { source = root } } })
+			local root = H.make_tree(fx.simple.tree)
+			lw.collect({ configs = { cfg1 = { source = root } } })
 			local rtp = vim.opt.rtp:get()
 			local found = vim.tbl_contains(rtp, root)
 			H.cleanup(root)
@@ -190,9 +120,9 @@ describe("collect()", function()
 
 	it("does not add workspace path to rtp twice on repeated calls", function()
 		with_state(function()
-			local root = make_workspace()
-			lw.collect({ configs = { ws1 = { source = root } } })
-			lw.collect({ configs = { ws1 = { source = root } } })
+			local root = H.make_tree(fx.simple.tree)
+			lw.collect({ configs = { cfg1 = { source = root } } })
+			lw.collect({ configs = { cfg1 = { source = root } } })
 			local count = 0
 			for _, p in ipairs(vim.opt.rtp:get()) do
 				if p == root then count = count + 1 end
@@ -202,52 +132,280 @@ describe("collect()", function()
 		end)
 	end)
 
-	it("loads specs from custom spec dir (lazy/) when specified in opts.specs", function()
+	-- ── with_plugins: single workspace + plugins/ dir ──────────────────────
+
+	it("returns specs from workspace plugins/ dir", function()
 		with_state(function()
-			local root = make_workspace({
-				["lua/mws/lazy/foo.lua"] = "return { 'foo/bar' }",
-			})
-			local specs = lw.collect({ configs = { ws1 = { source = root } }, specs = { "lazy" } })
+			local root = H.make_tree(fx.with_plugins.tree)
+			local specs = lw.collect({ configs = { cfg1 = { source = root } } })
 			H.cleanup(root)
-			assert.are.equal(1, #specs)
+			assert.are.equal(fx.with_plugins.SPEC_COUNT, #specs)
+		end)
+	end)
+
+	it("collects multiple spec files from plugins/", function()
+		with_state(function()
+			local root = H.make_tree(fx.with_plugins.tree)
+			local specs = lw.collect({ configs = { cfg1 = { source = root } } })
+			H.cleanup(root)
+			assert.is_true(#specs > 1)
+		end)
+	end)
+
+	it("excludes workspace excluded in state", function()
+		with_state(function()
+			local root = H.make_tree(fx.with_plugins.tree)
+			state.write({ cfg1 = { [fx.with_plugins.WS] = false } })
+			local specs = lw.collect({ configs = { cfg1 = { source = root } } })
+			H.cleanup(root)
+			assert.are.same({}, specs)
+		end)
+	end)
+
+	it("includes workspace included in state", function()
+		with_state(function()
+			local root = H.make_tree(fx.with_plugins.tree)
+			state.write({ cfg1 = { [fx.with_plugins.WS] = true } })
+			local specs = lw.collect({ configs = { cfg1 = { source = root } } })
+			H.cleanup(root)
+			assert.are.equal(fx.with_plugins.SPEC_COUNT, #specs)
+		end)
+	end)
+
+	it("skips malformed spec files with WARN", function()
+		with_state(function()
+			local tree = vim.tbl_extend("force", fx.with_plugins.tree, {
+				["lua/" .. fx.with_plugins.WS .. "/plugins/bad.lua"] = "this is not valid lua %%%",
+			})
+			local root = H.make_tree(tree)
+			local warned = false
+			local orig = vim.notify
+			vim.notify = function(_, level)
+				if level == vim.log.levels.WARN then warned = true end
+			end
+			local specs = lw.collect({ configs = { cfg1 = { source = root } } })
+			vim.notify = orig
+			H.cleanup(root)
+			assert.is_true(warned)
+			assert.are.equal(fx.with_plugins.SPEC_COUNT, #specs)
 		end)
 	end)
 
 	it("includes non-lazy-spec tables (cannot distinguish from valid specs)", function()
 		with_state(function()
-			local root = make_workspace({
-				["lua/mws/plugins/config_table.lua"] = "return { key = 'value' }",
+			local tree = vim.tbl_extend("force", fx.simple.tree, {
+				["lua/" .. fx.simple.WS .. "/plugins/config_table.lua"] = "return { key = 'value' }",
 			})
-			local specs = lw.collect({ configs = { ws1 = { source = root } } })
+			local root = H.make_tree(tree)
+			local specs = lw.collect({ configs = { cfg1 = { source = root } } })
 			H.cleanup(root)
-			-- table passes through — lazy.setup() would receive it and may error
 			assert.are.equal(1, #specs)
 		end)
 	end)
 
 	it("skips non-table return values from spec files silently", function()
 		with_state(function()
-			local root = make_workspace({
-				["lua/mws/plugins/not_a_spec.lua"] = "return 'just a string'",
-				["lua/mws/plugins/valid.lua"]       = "return { 'foo/bar' }",
+			local tree = vim.tbl_extend("force", fx.simple.tree, {
+				["lua/" .. fx.simple.WS .. "/plugins/not_a_spec.lua"] = "return 'just a string'",
+				["lua/" .. fx.simple.WS .. "/plugins/valid.lua"]      = "return { 'foo/bar' }",
 			})
-			local specs = lw.collect({ configs = { ws1 = { source = root } } })
+			local root = H.make_tree(tree)
+			local specs = lw.collect({ configs = { cfg1 = { source = root } } })
 			H.cleanup(root)
 			assert.are.equal(1, #specs)
 		end)
 	end)
 
+	-- ── config load order ─────────────────────────────────────────────────
+
+	it("array-style configs run workspace setup() in declared order", function()
+		with_state(function()
+			local mk_init = function(val)
+				return "local M = {}\nfunction M.setup() vim.g.lw_order_test = '" .. val .. "' end\nreturn M"
+			end
+			local root1 = H.make_tree({ ["lua/ws/init.lua"] = mk_init("first") })
+			local root2 = H.make_tree({ ["lua/ws/init.lua"] = mk_init("second") })
+			vim.g.lw_order_test = nil
+			lw.collect({ configs = { { source = root1 }, { source = root2 } } })
+			vim.wait(100)
+			H.cleanup(root1)
+			H.cleanup(root2)
+			assert.are.equal("second", vim.g.lw_order_test)
+		end)
+	end)
+
+	it("reversing array-style config order reverses setup() execution", function()
+		with_state(function()
+			local mk_init = function(val)
+				return "local M = {}\nfunction M.setup() vim.g.lw_order_test = '" .. val .. "' end\nreturn M"
+			end
+			local root1 = H.make_tree({ ["lua/ws/init.lua"] = mk_init("first") })
+			local root2 = H.make_tree({ ["lua/ws/init.lua"] = mk_init("second") })
+			vim.g.lw_order_test = nil
+			lw.collect({ configs = { { source = root2 }, { source = root1 } } })
+			vim.wait(100)
+			H.cleanup(root1)
+			H.cleanup(root2)
+			assert.are.equal("first", vim.g.lw_order_test)
+		end)
+	end)
+
+	-- ── multi: multiple sibling workspaces in same config root ──────────────
+
 	it("collects specs from multiple workspaces in same config", function()
 		with_state(function()
-			local root = H.make_tree({
-				["lua/ws_a/init.lua"] = "local M = {}\nfunction M.setup() end\nreturn M",
-				["lua/ws_a/plugins/alpha.lua"] = "return { 'a/alpha' }",
-				["lua/ws_b/init.lua"] = "local M = {}\nfunction M.setup() end\nreturn M",
-				["lua/ws_b/plugins/beta.lua"] = "return { 'b/beta' }",
-			})
+			local root = H.make_tree(fx.multi.tree)
 			local specs = lw.collect({ configs = { cfg1 = { source = root } } })
 			H.cleanup(root)
-			assert.are.equal(2, #specs)
+			assert.are.equal(fx.multi.SPEC_COUNT, #specs)
+		end)
+	end)
+
+	-- ── nested: container dir pattern (lua/group/common/, lua/group/personal/) ─
+
+	it("detects and loads workspaces under container dir", function()
+		with_state(function()
+			local root = H.make_tree(fx.nested.tree)
+			local specs = lw.collect({ configs = { cfg1 = { source = root } } })
+			H.cleanup(root)
+			assert.are.equal(fx.nested.SPEC_COUNT, #specs)
+		end)
+	end)
+
+	it("excludes nested workspace by full slash-separated path key", function()
+		with_state(function()
+			local root = H.make_tree(fx.nested.tree)
+			state.write({ cfg1 = { [fx.nested.WS_COMMON] = false } })
+			local specs = lw.collect({ configs = { cfg1 = { source = root } } })
+			H.cleanup(root)
+			assert.are.equal(fx.nested.SPEC_COUNT - 1, #specs)
+		end)
+	end)
+
+	it("excludes all nested workspaces when all marked false", function()
+		with_state(function()
+			local root = H.make_tree(fx.nested.tree)
+			state.write({ cfg1 = {
+				[fx.nested.WS_COMMON]   = false,
+				[fx.nested.WS_PERSONAL] = false,
+			} })
+			local specs = lw.collect({ configs = { cfg1 = { source = root } } })
+			H.cleanup(root)
+			assert.are.same({}, specs)
+		end)
+	end)
+
+	-- ── custom_spec: non-standard spec directory ────────────────────────────
+
+	it("loads specs from custom spec dir when specified in opts.specs", function()
+		with_state(function()
+			local f = fx.custom_spec
+			local root = H.make_tree(f.tree)
+			local specs = lw.collect(H.collect_args(root, f.opts))
+			H.cleanup(root)
+			assert.are.equal(f.SPEC_COUNT, #specs)
+		end)
+	end)
+end)
+
+-- ── neighbor spec dirs at config root ────────────────────────────────────────
+-- Spec dirs can sit beside workspaces at the lua/ root (not just inside them).
+
+describe("neighbor spec dirs at config root", function()
+	-- neighbor_spec_no_init: spec-named dir without init.lua → load individual files.
+	-- NEW — not yet implemented.
+	describe("spec-named neighbor dir without init.lua loads individual files", function()
+		local f = fx.neighbor_spec_no_init
+
+		it("loads individual .lua files from neighbor spec dir as specs", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				local specs = lw.collect(H.collect_args(root, f.opts))
+				H.cleanup(root)
+				assert.are.equal(f.SPEC_COUNT, #specs)
+			end)
+		end)
+
+		it("neighbor spec dir is not registered as workspace", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				lw.collect(H.collect_args(root, f.opts))
+				local st = state.read()
+				H.cleanup(root)
+				assert.is_not_nil(st.cfg1 and st.cfg1[f.WS])
+				assert.is_nil(st.cfg1 and st.cfg1[f.SPEC_DIR])
+			end)
+		end)
+
+		it("dirs not named in specs are not loaded", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				local specs = lw.collect(H.collect_args(root, f.opts))
+				H.cleanup(root)
+				assert.are.equal(f.SPEC_COUNT, #specs)
+			end)
+		end)
+	end)
+
+	-- neighbor_workspace: neighbor dir with init.lua NOT in specs → workspace.
+	-- Existing behavior; tests are regression guards.
+	describe("neighbor dir with init.lua not in specs is a workspace", function()
+		local f = fx.neighbor_workspace
+
+		it("detects both default and plugins as workspaces", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				lw.collect(H.collect_args(root, f.opts))
+				local st = state.read()
+				H.cleanup(root)
+				assert.is_not_nil(st.cfg1 and st.cfg1[f.WS_DEFAULT])
+				assert.is_not_nil(st.cfg1 and st.cfg1[f.WS_PLUGINS])
+			end)
+		end)
+
+		it("dir without init.lua and not named in specs is not a workspace", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				lw.collect(H.collect_args(root, f.opts))
+				local st = state.read()
+				H.cleanup(root)
+				assert.is_nil(st.cfg1 and st.cfg1["util"])
+			end)
+		end)
+	end)
+
+	-- neighbor_spec_with_init: neighbor dir with init.lua AND named in specs → spec dir.
+	-- NEW — not yet implemented.
+	describe("neighbor dir with init.lua named in specs is a spec dir not workspace", function()
+		local f = fx.neighbor_spec_with_init
+
+		it("loads spec from neighbor spec dir via init.lua", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				local specs = lw.collect(H.collect_args(root, f.opts))
+				H.cleanup(root)
+				assert.are.equal(f.SPEC_COUNT, #specs)
+			end)
+		end)
+
+		it("does not register neighbor spec dir as a workspace", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				lw.collect(H.collect_args(root, f.opts))
+				local st = state.read()
+				H.cleanup(root)
+				assert.is_nil(st.cfg1 and st.cfg1[f.SPEC_DIR])
+			end)
+		end)
+
+		it("still detects default as workspace", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				lw.collect(H.collect_args(root, f.opts))
+				local st = state.read()
+				H.cleanup(root)
+				assert.is_not_nil(st.cfg1 and st.cfg1[f.WS])
+			end)
 		end)
 	end)
 end)
@@ -291,61 +449,5 @@ describe("setup() called_by_lazy guard", function()
 			lw.setup({})
 			lw.setup({})
 		end)
-	end)
-end)
-
--- ── generated init.lua shape (via write_root_init) ───────────────────────────
-
-describe("write_root_init output shape", function()
-	local bootstrap = require("lazy-workspaces.bootstrap")
-	local write_ri = bootstrap._test.write_root_init
-
-	it("calls lazy-workspaces setup not lazy.setup", function()
-		local out = vim.fn.tempname()
-		vim.fn.mkdir(out, "p")
-		write_ri(out)
-		assert.is_true(H.content_has(out .. "/init.lua", 'require%("lazy%-workspaces"%)%.setup'))
-		assert.is_true(H.content_lacks(out .. "/init.lua", 'require%("lazy"%)%.setup'))
-		H.cleanup(out)
-	end)
-
-	it("does not call collect directly", function()
-		local out = vim.fn.tempname()
-		vim.fn.mkdir(out, "p")
-		write_ri(out)
-		assert.is_true(H.content_lacks(out .. "/init.lua", "%.collect%("))
-		H.cleanup(out)
-	end)
-
-	it("contains lazy-workspaces bootstrap", function()
-		local out = vim.fn.tempname()
-		vim.fn.mkdir(out, "p")
-		write_ri(out)
-		assert.is_true(H.content_has(out .. "/init.lua", "lazy%-workspaces%.nvim"))
-		H.cleanup(out)
-	end)
-
-	it("does not bootstrap lazy.nvim directly", function()
-		local out = vim.fn.tempname()
-		vim.fn.mkdir(out, "p")
-		write_ri(out)
-		assert.is_true(H.content_lacks(out .. "/init.lua", "lazy%.nvim"))
-		H.cleanup(out)
-	end)
-
-	it("includes workspace url with out_dir path", function()
-		local out = vim.fn.tempname()
-		vim.fn.mkdir(out, "p")
-		write_ri(out)
-		assert.is_true(H.content_has(out .. "/init.lua", vim.pesc(out)))
-		H.cleanup(out)
-	end)
-
-	it("includes configs opt key", function()
-		local out = vim.fn.tempname()
-		vim.fn.mkdir(out, "p")
-		write_ri(out)
-		assert.is_true(H.content_has(out .. "/init.lua", "configs"))
-		H.cleanup(out)
 	end)
 end)

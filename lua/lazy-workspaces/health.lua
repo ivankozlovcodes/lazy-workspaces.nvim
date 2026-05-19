@@ -1,25 +1,11 @@
 local M = {}
 
-local function name_from_source(source)
-	local ssh = source:match("^git@[^:]+:(.+)$")
-	if ssh then
-		return ssh:gsub("%.git$", "")
-	end
-	if source:match("^https?://") then
-		local two = source:match("([^/]+/[^/]+)$")
-		if two then
-			return two:gsub("%.git$", "")
-		end
-	end
-	return source
-end
-
 function M.check()
 	local h = vim.health
 	local lw = require("lazy-workspaces")
 	local opts = lw._get_opts()
 
-	-- ── Prerequisites (one line each) ─────────────────────────────────────────
+	-- ── Prerequisites ─────────────────────────────────────────────────────────
 	h.start("lazy-workspaces")
 
 	h.info("version: " .. (lw.version or "unknown"))
@@ -36,6 +22,7 @@ function M.check()
 		return
 	end
 	h.ok("setup() called")
+	h.info("version: " .. (lw.version or "unknown"))
 
 	local state_mod = require("lazy-workspaces.state")
 	local json_path = state_mod.path()
@@ -44,92 +31,80 @@ function M.check()
 	else
 		h.warn("state file not found: " .. json_path .. " (created on first launch)")
 	end
-	local state = state_mod.read()
 
-	-- ── Configs ───────────────────────────────────────────────────────────────
-	local resolver = require("lazy-workspaces.resolver")
-	local spec_dirs = opts.specs or { "plugins" }
-	local named_configs = {}
-
-	for k, v in pairs(opts.configs or {}) do
-		local name
-		if type(k) == "string" then
-			name = k
-		else
-			local src = type(v) == "string" and v or (type(v) == "table" and v.source or tostring(k))
-			name = name_from_source(src)
-		end
-		named_configs[name] = v
-	end
-
-	if vim.tbl_isempty(named_configs) then
-		h.warn("no configs defined")
+	local scan_cache = lw._get_scan_cache()
+	if not scan_cache then
+		h.warn("collect() not yet run — remaining checks skipped")
 		return
 	end
 
-	local spec_entries = {} -- collected for the spec paths section
+	local state = state_mod.read()
+	local spec_dirs = opts.specs or { "plugins" }
+	local spec_entries = {}
 
-	for cfg_name, value in pairs(named_configs) do
-		local source = type(value) == "string" and value or value.source
-		local ok, local_path = pcall(resolver.resolve, source, type(value) == "table" and value.branch or nil)
+	-- ── Configs ───────────────────────────────────────────────────────────────
+	for cfg_name, result in pairs(scan_cache) do
+		h.start(cfg_name .. "  (" .. result.path .. ")")
 
-		if not ok then
-			h.start(cfg_name)
-			h.error("resolve failed — " .. tostring(local_path))
-		else
-			h.start(cfg_name .. "  (" .. local_path .. ")")
+		local ws_state = state[cfg_name] or {}
+		local COL = 10
+		local fmt = ("%%-%ds %%s"):format(COL)
 
-			local ws_names = lw.detect_workspaces(local_path .. "/lua")
-			local ws_state = state[cfg_name] or {}
+		if #result.workspaces == 0 and #result.specs == 0 then
+			h.warn("no workspaces or spec dirs found under lua/")
+		end
 
-			if #ws_names == 0 then
-				h.warn("no workspaces found under lua/")
-			end
-
-			local COL = 10 -- width of "[excluded]"
-			local fmt = ("%%-%ds %%s"):format(COL)
-
-			local on_disk = {}
-			for _, ws in ipairs(ws_names) do
-				on_disk[ws] = true
-				local has_init = vim.fn.filereadable(local_path .. "/lua/" .. ws .. "/init.lua") == 1
-				if ws_state[ws] == false then
-					h.info(fmt:format("[excluded]", ws))
-				elseif not has_init then
-					h.warn(ws .. " - no init.lua")
-				else
-					h.info(fmt:format("OK", ws))
-					for _, sd in ipairs(spec_dirs) do
-						local dir = local_path .. "/lua/" .. ws .. "/" .. sd
-						if vim.fn.isdirectory(dir) == 1 then
-							local n = #vim.fn.glob(dir .. "/*.lua", false, true)
-							spec_entries[#spec_entries + 1] = {
-								label = cfg_name .. "  " .. ws .. "  " .. sd,
-								dir = dir,
-								count = n,
-							}
-						end
+		local on_disk = {}
+		for _, ws in ipairs(result.workspaces) do
+			on_disk[ws] = true
+			local has_init = vim.fn.filereadable(result.path .. "/lua/" .. ws .. "/init.lua") == 1
+			if ws_state[ws] == false then
+				h.info(fmt:format("[excluded]", ws))
+			elseif not has_init then
+				h.warn(ws .. " — no init.lua")
+			else
+				h.info(fmt:format("OK", ws))
+				for _, sd in ipairs(spec_dirs) do
+					local dir = result.path .. "/lua/" .. ws .. "/" .. sd
+					if vim.fn.isdirectory(dir) == 1 then
+						spec_entries[#spec_entries + 1] = {
+							label = cfg_name .. "  " .. ws .. "  " .. sd,
+							dir = dir,
+							count = #vim.fn.glob(dir .. "/*.lua", false, true),
+						}
 					end
 				end
 			end
+		end
 
-			for ws in pairs(ws_state) do
-				if not on_disk[ws] then
-					h.warn(ws .. " No such directory " .. local_path .. "/lua/" .. ws)
-				end
+		for ws in pairs(ws_state) do
+			if not on_disk[ws] then
+				h.warn(ws .. " — stale, not on disk")
 			end
+		end
+
+		for _, ns in ipairs(result.specs) do
+			local count = ns.via_init and #vim.fn.glob(ns.path .. "/*.lua", false, true)
+				or #vim.fn.glob(ns.path .. "/*.lua", false, true)
+			local how = ns.via_init and "via init.lua" or "individual files"
+			spec_entries[#spec_entries + 1] = {
+				label = cfg_name .. " " .. ns.name,
+				dir = ns.path,
+				count = count,
+				note = how,
+			}
 		end
 	end
 
-	-- stale config keys: in JSON but not in opts
+	-- stale config keys: in JSON but not in scan_cache
 	for cfg_key in pairs(state) do
-		if not named_configs[cfg_key] then
+		if not scan_cache[cfg_key] then
 			h.start(cfg_key)
 			h.warn("stale — no matching config in setup()")
 		end
 	end
 
-	-- spec paths section
+	-- ── Spec paths ────────────────────────────────────────────────────────────
 	if #spec_entries > 0 then
 		h.start("lazy-workspaces: spec paths")
 		local max_w = 0
@@ -138,7 +113,11 @@ function M.check()
 		end
 		local fmt = ("%%-%ds  %%s  (%%d specs)"):format(max_w)
 		for _, e in ipairs(spec_entries) do
-			h.info(fmt:format(e.label, e.dir, e.count))
+			local line = fmt:format(e.label, e.dir, e.count)
+			if e.note then
+				line = line .. "  [" .. e.note .. "]"
+			end
+			h.info(line)
 		end
 	end
 end
