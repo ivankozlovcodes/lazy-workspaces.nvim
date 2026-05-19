@@ -169,14 +169,8 @@ function M.collect(opts)
 			table.insert(normalized_configs, { name = name, value = source })
 		end
 	else
-		-- Dictionary style: sort keys to make it deterministic (alphabetical)
-		local keys = {}
-		for k, _ in pairs(opts.configs or {}) do
-			table.insert(keys, k)
-		end
-		table.sort(keys)
-		for _, k in ipairs(keys) do
-			table.insert(normalized_configs, { name = k, value = opts.configs[k] })
+		for k, v in pairs(opts.configs or {}) do
+			table.insert(normalized_configs, { name = k, value = v })
 		end
 	end
 

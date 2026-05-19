@@ -216,6 +216,40 @@ describe("collect()", function()
 		end)
 	end)
 
+	-- ── config load order ─────────────────────────────────────────────────
+
+	it("array-style configs run workspace setup() in declared order", function()
+		with_state(function()
+			local mk_init = function(val)
+				return "local M = {}\nfunction M.setup() vim.g.lw_order_test = '" .. val .. "' end\nreturn M"
+			end
+			local root1 = H.make_tree({ ["lua/ws/init.lua"] = mk_init("first") })
+			local root2 = H.make_tree({ ["lua/ws/init.lua"] = mk_init("second") })
+			vim.g.lw_order_test = nil
+			lw.collect({ configs = { { source = root1 }, { source = root2 } } })
+			vim.wait(100)
+			H.cleanup(root1)
+			H.cleanup(root2)
+			assert.are.equal("second", vim.g.lw_order_test)
+		end)
+	end)
+
+	it("reversing array-style config order reverses setup() execution", function()
+		with_state(function()
+			local mk_init = function(val)
+				return "local M = {}\nfunction M.setup() vim.g.lw_order_test = '" .. val .. "' end\nreturn M"
+			end
+			local root1 = H.make_tree({ ["lua/ws/init.lua"] = mk_init("first") })
+			local root2 = H.make_tree({ ["lua/ws/init.lua"] = mk_init("second") })
+			vim.g.lw_order_test = nil
+			lw.collect({ configs = { { source = root2 }, { source = root1 } } })
+			vim.wait(100)
+			H.cleanup(root1)
+			H.cleanup(root2)
+			assert.are.equal("first", vim.g.lw_order_test)
+		end)
+	end)
+
 	-- ── multi: multiple sibling workspaces in same config root ──────────────
 
 	it("collects specs from multiple workspaces in same config", function()
