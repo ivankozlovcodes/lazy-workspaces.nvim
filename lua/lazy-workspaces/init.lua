@@ -157,9 +157,12 @@ function M.collect(opts)
 	local configs_map = {} -- { cfg_name = [ws_names] } for reconcile
 	local seen_paths = {}
 
-	for _, cfg in ipairs(normalized_configs) do
-		local cfg_name = cfg.name
-		local value = cfg.value
+	local spec_dir_set = {}
+	for _, s in ipairs(opts.specs or { "plugins" }) do
+		spec_dir_set[s] = true
+	end
+
+	for cfg_name, value in pairs(named_configs) do
 		local url, branch = parse_source(value)
 		local ok, path = pcall(resolver.resolve, url, branch)
 		if not ok then
@@ -180,7 +183,50 @@ function M.collect(opts)
 				end
 			end
 
-			local ws_names = detect_workspaces(path .. "/lua")
+			-- Neighbor spec dirs: top-level dirs named in opts.specs loaded directly,
+			-- not as workspaces. No init.lua → individual files. Has init.lua → via init.lua.
+			for _, spec_dir in ipairs(opts.specs or { "plugins" }) do
+				local dir = path .. "/lua/" .. spec_dir
+				if vim.fn.isdirectory(dir) == 1 then
+					local init = dir .. "/init.lua"
+					if vim.fn.filereadable(init) == 1 then
+						local chunk, load_err = loadfile(init)
+						if not chunk then
+							vim.notify(
+								"[lazy-workspaces] failed to load neighbor spec " .. init .. ": " .. tostring(load_err),
+								vim.log.levels.WARN
+							)
+						else
+							local ok2, spec = pcall(chunk)
+							if ok2 and type(spec) == "table" then
+								specs[#specs + 1] = spec
+							end
+						end
+					else
+						for _, file in ipairs(vim.fn.glob(dir .. "/*.lua", false, true)) do
+							local chunk, load_err = loadfile(file)
+							if not chunk then
+								vim.notify(
+									"[lazy-workspaces] failed to load neighbor spec "
+										.. file
+										.. ": "
+										.. tostring(load_err),
+									vim.log.levels.WARN
+								)
+							else
+								local ok2, spec = pcall(chunk)
+								if ok2 and type(spec) == "table" then
+									specs[#specs + 1] = spec
+								end
+							end
+						end
+					end
+				end
+			end
+
+			local ws_names = vim.tbl_filter(function(name)
+				return not spec_dir_set[name]
+			end, detect_workspaces(path .. "/lua"))
 			if #ws_names > 0 then
 				resolved[#resolved + 1] = { cfg_name = cfg_name, path = path, ws_names = ws_names }
 				configs_map[cfg_name] = ws_names
