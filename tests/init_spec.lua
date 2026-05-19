@@ -8,6 +8,9 @@ local fx = {
 	multi        = require("tests.fixtures.workspaces.multi"),
 	nested       = require("tests.fixtures.workspaces.nested"),
 	custom_spec  = require("tests.fixtures.workspaces.custom_spec"),
+	neighbor_spec_no_init   = require("tests.fixtures.workspaces.neighbor_spec_no_init"),
+	neighbor_workspace      = require("tests.fixtures.workspaces.neighbor_workspace"),
+	neighbor_spec_with_init = require("tests.fixtures.workspaces.neighbor_spec_with_init"),
 }
 
 local function with_state(fn)
@@ -267,6 +270,108 @@ describe("collect()", function()
 			local specs = lw.collect(H.collect_args(root, f.opts))
 			H.cleanup(root)
 			assert.are.equal(f.SPEC_COUNT, #specs)
+		end)
+	end)
+end)
+
+-- ── neighbor spec dirs at config root ────────────────────────────────────────
+-- Spec dirs can sit beside workspaces at the lua/ root (not just inside them).
+
+describe("neighbor spec dirs at config root", function()
+	-- neighbor_spec_no_init: spec-named dir without init.lua → load individual files.
+	-- NEW — not yet implemented.
+	describe("spec-named neighbor dir without init.lua loads individual files", function()
+		local f = fx.neighbor_spec_no_init
+
+		it("loads individual .lua files from neighbor spec dir as specs", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				local specs = lw.collect(H.collect_args(root, f.opts))
+				H.cleanup(root)
+				assert.are.equal(f.SPEC_COUNT, #specs)
+			end)
+		end)
+
+		it("neighbor spec dir is not registered as workspace", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				lw.collect(H.collect_args(root, f.opts))
+				local st = state.read()
+				H.cleanup(root)
+				assert.is_not_nil(st.cfg1 and st.cfg1[f.WS])
+				assert.is_nil(st.cfg1 and st.cfg1[f.SPEC_DIR])
+			end)
+		end)
+
+		it("dirs not named in specs are not loaded", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				local specs = lw.collect(H.collect_args(root, f.opts))
+				H.cleanup(root)
+				assert.are.equal(f.SPEC_COUNT, #specs)
+			end)
+		end)
+	end)
+
+	-- neighbor_workspace: neighbor dir with init.lua NOT in specs → workspace.
+	-- Existing behavior; tests are regression guards.
+	describe("neighbor dir with init.lua not in specs is a workspace", function()
+		local f = fx.neighbor_workspace
+
+		it("detects both default and plugins as workspaces", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				lw.collect(H.collect_args(root, f.opts))
+				local st = state.read()
+				H.cleanup(root)
+				assert.is_not_nil(st.cfg1 and st.cfg1[f.WS_DEFAULT])
+				assert.is_not_nil(st.cfg1 and st.cfg1[f.WS_PLUGINS])
+			end)
+		end)
+
+		it("dir without init.lua and not named in specs is not a workspace", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				lw.collect(H.collect_args(root, f.opts))
+				local st = state.read()
+				H.cleanup(root)
+				assert.is_nil(st.cfg1 and st.cfg1["util"])
+			end)
+		end)
+	end)
+
+	-- neighbor_spec_with_init: neighbor dir with init.lua AND named in specs → spec dir.
+	-- NEW — not yet implemented.
+	describe("neighbor dir with init.lua named in specs is a spec dir not workspace", function()
+		local f = fx.neighbor_spec_with_init
+
+		it("loads spec from neighbor spec dir via init.lua", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				local specs = lw.collect(H.collect_args(root, f.opts))
+				H.cleanup(root)
+				assert.are.equal(f.SPEC_COUNT, #specs)
+			end)
+		end)
+
+		it("does not register neighbor spec dir as a workspace", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				lw.collect(H.collect_args(root, f.opts))
+				local st = state.read()
+				H.cleanup(root)
+				assert.is_nil(st.cfg1 and st.cfg1[f.SPEC_DIR])
+			end)
+		end)
+
+		it("still detects default as workspace", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				lw.collect(H.collect_args(root, f.opts))
+				local st = state.read()
+				H.cleanup(root)
+				assert.is_not_nil(st.cfg1 and st.cfg1[f.WS])
+			end)
 		end)
 	end)
 end)
