@@ -14,6 +14,7 @@ local opts_mod = require("lazy-workspaces.opts")
 ---@class LazyWorkspacesOpts
 ---@field configs table<string, string|WorkspaceSource>  config_name → source string or {source,branch} table
 ---@field specs string[]?  subdirectory names scanned for lazy specs (default: {"plugins"})
+---@field auto_pull boolean?  pull git configs and local .git repos on startup (default: true)
 
 ---@class LazyWorkspacesSetupOpts : LazyWorkspacesOpts
 ---@field lazy table?  opts forwarded verbatim to lazy.setup() (rocks, change_detection, etc.)
@@ -210,7 +211,7 @@ end
 ---@param opts LazyWorkspacesOpts
 ---@return table
 function M.collect(opts)
-	opts = opts or {}
+	opts = opts_mod.apply_defaults(opts)
 	local resolver = require("lazy-workspaces.resolver")
 	local state_mod = require("lazy-workspaces.state")
 	local specs = {}
@@ -268,6 +269,14 @@ function M.collect(opts)
 				configs_map[e.name] = classified.workspaces
 			end
 		end
+	end
+
+	if opts.auto_pull then
+		pull_all_async(entries, function(failed)
+			for _, name in ipairs(failed) do
+				vim.notify("[lazy-workspaces] auto-pull failed for '" .. name .. "'", vim.log.levels.WARN)
+			end
+		end)
 	end
 
 	-- Expose resolved config paths via vim.g.lw so workspace setup() calls can reference them.
@@ -445,8 +454,9 @@ local function sync_configs()
 		return
 	end
 
-	local entries = opts_mod.normalize(_opts.configs)
-	local spec_dir_set = build_spec_dir_set(_opts.specs)
+	local resolved_opts = opts_mod.apply_defaults(_opts)
+	local entries = opts_mod.normalize(resolved_opts.configs)
+	local spec_dir_set = build_spec_dir_set(resolved_opts.specs)
 
 	pull_all_async(entries, function(failed)
 		local state_mod = require("lazy-workspaces.state")

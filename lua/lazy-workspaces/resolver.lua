@@ -16,7 +16,8 @@ function M.resolve(source, branch)
 	return path
 end
 
---- Clone or update a git repo, return local path.
+--- Clone a git repo if not already present, return local path.
+--- Pull (refresh) is handled separately by collect() via pull_all_async.
 ---@param source string
 ---@param branch string?
 ---@return string
@@ -24,7 +25,6 @@ function M.resolve_git(source, branch)
 	local name = source:match("/([^/]+)$"):gsub("%.git$", "")
 	local dest = vim.fn.stdpath("data") .. "/lazy-workspaces/" .. name
 
-	-- TODO: refresh (pull) on every nvim open, not just when repo is missing
 	if vim.fn.isdirectory(dest) == 0 then
 		vim.notify("[lazy-workspaces] cloning " .. source .. " ...", vim.log.levels.INFO)
 		vim.fn.mkdir(vim.fn.fnamemodify(dest, ":h"), "p")
@@ -37,19 +37,6 @@ function M.resolve_git(source, branch)
 		if vim.v.shell_error ~= 0 then
 			error("git clone failed for " .. source .. ": " .. out)
 		end
-	else
-		-- async pull so startup isn't blocked
-		local cmd = { "git", "-C", dest, "pull", "--ff-only" }
-		if branch then
-			vim.list_extend(cmd, { "origin", branch })
-		end
-		vim.fn.jobstart(cmd, {
-			on_exit = function(_, code)
-				if code ~= 0 then
-					vim.notify("[lazy-workspaces] git pull failed for " .. name, vim.log.levels.WARN)
-				end
-			end,
-		})
 	end
 
 	return dest

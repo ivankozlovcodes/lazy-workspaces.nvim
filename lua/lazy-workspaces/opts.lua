@@ -63,6 +63,19 @@ function M.normalize(configs)
 	return out
 end
 
+---@type LazyWorkspacesOpts
+M.defaults = {
+	specs     = { "plugins" },
+	auto_pull = true,
+}
+
+--- Return opts with defaults applied. Explicit false is preserved (vim.tbl_deep_extend "keep").
+---@param opts LazyWorkspacesOpts?
+---@return LazyWorkspacesOpts
+function M.apply_defaults(opts)
+	return vim.tbl_deep_extend("keep", opts or {}, M.defaults)
+end
+
 --- Compute the local filesystem path for a config entry without triggering a git pull.
 ---@param entry table  { source: string, branch: string|nil }
 ---@return string

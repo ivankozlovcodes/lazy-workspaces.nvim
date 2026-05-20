@@ -162,3 +162,40 @@ describe("local_path_for()", function()
 		assert.is_falsy(result:find("%.git"))
 	end)
 end)
+
+-- ── apply_defaults() ──────────────────────────────────────────────────────────
+
+describe("apply_defaults()", function()
+	it("fills specs when absent", function()
+		local result = opts.apply_defaults({})
+		assert.are.same({ "plugins" }, result.specs)
+	end)
+
+	it("fills auto_pull = true when absent", function()
+		local result = opts.apply_defaults({})
+		assert.is_true(result.auto_pull)
+	end)
+
+	it("preserves explicit specs", function()
+		local result = opts.apply_defaults({ specs = { "plugins", "themes" } })
+		assert.are.same({ "plugins", "themes" }, result.specs)
+	end)
+
+	it("preserves explicit auto_pull = false", function()
+		local result = opts.apply_defaults({ auto_pull = false })
+		assert.is_false(result.auto_pull)
+	end)
+
+	it("treats nil opts same as empty table", function()
+		local result = opts.apply_defaults(nil)
+		assert.is_true(result.auto_pull)
+		assert.are.same({ "plugins" }, result.specs)
+	end)
+
+	it("does not mutate the input table", function()
+		local input = {}
+		opts.apply_defaults(input)
+		assert.is_nil(input.auto_pull)
+		assert.is_nil(input.specs)
+	end)
+end)
