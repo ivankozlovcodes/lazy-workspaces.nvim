@@ -1,6 +1,6 @@
 local M = {}
 
-M.version = "0.1.3"
+M.version = "0.1.4"
 
 local _self_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
 local _opts = nil
@@ -44,26 +44,22 @@ local function scan_dir(lua_dir, prefix)
 	return entries
 end
 
---- Classify scanned entries into workspaces and root-level spec dirs.
---- spec_dir_set: set of top-level dir names treated as spec dirs (not workspaces).
---- is_root: true for the top-level call (enables root spec dir detection).
+--- Classify scanned entries into workspaces and spec dirs.
+--- Spec dirs named in spec_dir_set are recognized at any nesting depth.
 ---@return table  { workspaces: string[], specs: table[] }
-local function classify_dirs(entries, spec_dir_set, is_root)
-	if is_root == nil then
-		is_root = true
-	end
+local function classify_dirs(entries, spec_dir_set)
 	local workspaces = {}
 	local specs = {}
 
 	for _, e in ipairs(entries) do
 		local has_init = vim.fn.filereadable(e.path .. "/init.lua") == 1
 
-		if is_root and spec_dir_set[e.name] then
+		if spec_dir_set[e.name] then
 			specs[#specs + 1] = { name = e.name, path = e.path, via_init = has_init }
 		elseif has_init then
 			workspaces[#workspaces + 1] = e.rel
 		elseif #e.kids > 0 then
-			local child = classify_dirs(e.kids, spec_dir_set, false)
+			local child = classify_dirs(e.kids, spec_dir_set)
 			if #child.workspaces > 0 then
 				local loose = vim.fn.glob(e.path .. "/*.lua", false, true)
 				if #loose > 0 then
@@ -80,6 +76,7 @@ local function classify_dirs(entries, spec_dir_set, is_root)
 					)
 				end
 				vim.list_extend(workspaces, child.workspaces)
+				vim.list_extend(specs, child.specs)
 			elseif #vim.fn.glob(e.path .. "/*.lua", false, true) == 0 then
 				workspaces[#workspaces + 1] = e.rel
 			end

@@ -1,3 +1,32 @@
+## [0.2.0] - 2026-05-20
+
+### 🚀 Features
+
+- [**breaking**] Recognize neighbor spec dirs at any container depth
+Previously spec dirs (e.g. plugins/) were only recognized when placed
+directly under lua/. Dirs with the same name inside container dirs
+were silently treated as workspaces instead.
+
+Now classify_dirs checks spec_dir_set at every nesting level and
+bubbles discovered specs up through container boundaries.
+
+```
+  Before:
+    -- opts: specs = { "plugins" }
+    -- lua/
+    --   group/
+    --     default/   → workspace ✓
+    --     plugins/   → workspace ✓  (bug: should be spec dir)
+
+  After:
+    -- opts: specs = { "plugins" }
+    -- lua/
+    --   group/
+    --     default/   → workspace ✓
+    --     plugins/   → spec dir ✓   (files loaded as lazy specs)
+```
+
+
 ## [0.1.3] - 2026-05-20
 
 ### 🚀 Features

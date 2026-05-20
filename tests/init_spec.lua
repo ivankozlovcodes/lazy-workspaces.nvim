@@ -11,6 +11,8 @@ local fx = {
 	neighbor_spec_no_init   = require("tests.fixtures.workspaces.neighbor_spec_no_init"),
 	neighbor_workspace      = require("tests.fixtures.workspaces.neighbor_workspace"),
 	neighbor_spec_with_init = require("tests.fixtures.workspaces.neighbor_spec_with_init"),
+	nested_neighbor_spec_no_init   = require("tests.fixtures.workspaces.nested_neighbor_spec_no_init"),
+	nested_neighbor_spec_with_init = require("tests.fixtures.workspaces.nested_neighbor_spec_with_init"),
 }
 
 local function with_state(fn)
@@ -399,6 +401,78 @@ describe("neighbor spec dirs at config root", function()
 		end)
 
 		it("still detects default as workspace", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				lw.collect(H.collect_args(root, f.opts))
+				local st = state.read()
+				H.cleanup(root)
+				assert.is_not_nil(st.cfg1 and st.cfg1[f.WS])
+			end)
+		end)
+	end)
+end)
+
+-- ── neighbor spec dirs inside container dirs ─────────────────────────────────
+-- Spec dirs work at any nesting depth, not just at lua/ root.
+
+describe("neighbor spec dirs inside container dirs", function()
+	describe("spec-named dir without init.lua inside container loads individual files", function()
+		local f = fx.nested_neighbor_spec_no_init
+
+		it("loads individual .lua files from nested neighbor spec dir", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				local specs = lw.collect(H.collect_args(root, f.opts))
+				H.cleanup(root)
+				assert.are.equal(f.SPEC_COUNT, #specs)
+			end)
+		end)
+
+		it("nested neighbor spec dir is not registered as workspace", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				lw.collect(H.collect_args(root, f.opts))
+				local st = state.read()
+				H.cleanup(root)
+				assert.is_not_nil(st.cfg1 and st.cfg1[f.WS])
+				assert.is_nil(st.cfg1 and st.cfg1[f.SPEC_DIR])
+			end)
+		end)
+
+		it("detects container workspace by slash-separated path", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				lw.collect(H.collect_args(root, f.opts))
+				local st = state.read()
+				H.cleanup(root)
+				assert.is_not_nil(st.cfg1 and st.cfg1[f.WS])
+			end)
+		end)
+	end)
+
+	describe("spec-named dir with init.lua inside container is loaded via init.lua", function()
+		local f = fx.nested_neighbor_spec_with_init
+
+		it("loads spec via init.lua from nested neighbor spec dir", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				local specs = lw.collect(H.collect_args(root, f.opts))
+				H.cleanup(root)
+				assert.are.equal(f.SPEC_COUNT, #specs)
+			end)
+		end)
+
+		it("does not register nested neighbor spec dir as workspace", function()
+			with_state(function()
+				local root = H.make_tree(f.tree)
+				lw.collect(H.collect_args(root, f.opts))
+				local st = state.read()
+				H.cleanup(root)
+				assert.is_nil(st.cfg1 and st.cfg1[f.SPEC_DIR])
+			end)
+		end)
+
+		it("detects container workspace by slash-separated path", function()
 			with_state(function()
 				local root = H.make_tree(f.tree)
 				lw.collect(H.collect_args(root, f.opts))
