@@ -1,3 +1,20 @@
+## [0.1.3] - 2026-05-20
+
+### 🚀 Features
+
+- Add workspace sync command
+  - `:LazyWorkspacesSync` command will attempt to pull all knowing
+    workspaces
+  - refactor: move common operation into helper functions so I don't go
+    crazy
+  - refactor: move opts related operations to opts.lua;
+  - test: add opts_spec
+
+
+- Auto pull configs on nvim start
+
+- Add autocomplete for opts.lazy as LazyConfig
+
 ## [0.1.2] - 2026-05-19
 
 ### 🚀 Features

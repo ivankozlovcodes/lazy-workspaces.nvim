@@ -1,10 +1,11 @@
 local M = {}
 
-M.version = "0.1.2"
+M.version = "0.1.3"
 
 local _self_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
 local _opts = nil
 local _scan_cache = nil -- populated by collect(); { cfg_name = { path, workspaces, specs } }
+local opts_mod = require("lazy-workspaces.opts")
 
 ---@class WorkspaceSource
 ---@field source string     local path (absolute or ~) or git URL (git@, https://)
@@ -13,9 +14,15 @@ local _scan_cache = nil -- populated by collect(); { cfg_name = { path, workspac
 ---@class LazyWorkspacesOpts
 ---@field configs table<string, string|WorkspaceSource>  config_name → source string or {source,branch} table
 ---@field specs string[]?  subdirectory names scanned for lazy specs (default: {"plugins"})
+---@field auto_pull boolean?  pull git configs and local .git repos on startup (default: true)
 
 ---@class LazyWorkspacesSetupOpts : LazyWorkspacesOpts
----@field lazy table?  opts forwarded verbatim to lazy.setup() (rocks, change_detection, etc.)
+---@field lazy LazyConfig?  opts forwarded verbatim to lazy.setup() (rocks, change_detection, etc.)
+
+---@class ResolvedConfig
+---@field name string        config name (key from opts.configs)
+---@field path string        absolute local path to the config root
+---@field workspaces string[] workspace rel-paths found under lua/
 
 --- Recursively scan all subdirectories under lua_dir. No init.lua check — pure structure.
 ---@param lua_dir string
@@ -94,18 +101,6 @@ function M.detect_workspaces(lua_dir)
 	return classify_dirs(scan_dir(lua_dir), {}).workspaces
 end
 
---- Extract source and branch from a config value.
----@param value string|WorkspaceSource
----@return string, string|nil
-local function parse_source(value)
-	if type(value) == "string" then
-		return value, nil
-	elseif type(value) == "table" then
-		return value.source, value.branch
-	end
-	error("invalid workspace source type: " .. type(value))
-end
-
 --- Return list of config names in state that contain a given workspace name.
 ---@param state table
 ---@param ws_name string
@@ -120,83 +115,124 @@ local function find_configs_with_ws(state, ws_name)
 	return matches
 end
 
+---@param specs_opt string[]?
+---@return table<string, true>
+local function build_spec_dir_set(specs_opt)
+	local set = {}
+	for _, s in ipairs(specs_opt or { "plugins" }) do
+		set[s] = true
+	end
+	return set
+end
+
+--- Scan one config root and classify its contents.
+---@param path string  absolute path to config root
+---@param spec_dir_set table
+---@return table  { workspaces: string[], specs: table[] }
+local function scan_config(path, spec_dir_set)
+	return classify_dirs(scan_dir(path .. "/lua"), spec_dir_set)
+end
+
+--- Load a single spec file. Returns the table it returns, or nil on failure (emits WARN).
+---@param file string
+---@param label string  used in the WARN message
+---@return table|nil
+local function load_spec_file(file, label)
+	local chunk, err = loadfile(file)
+	if not chunk then
+		vim.notify("[lazy-workspaces] failed to load " .. label .. ": " .. tostring(err), vim.log.levels.WARN)
+		return nil
+	end
+	local ok, result = pcall(chunk)
+	return (ok and type(result) == "table") and result or nil
+end
+
+--- Async pull all pullable configs: git URLs (clone or pull) and local paths that contain .git.
+--- Calls on_done(failed_names) when all jobs finish. Calls on_done({}) immediately if nothing to pull.
+---@param entries table[]  normalized entries from opts_mod.normalize()
+---@param on_done fun(failed: string[])
+local function pull_all_async(entries, on_done)
+	local jobs = {}
+	for _, e in ipairs(entries) do
+		local path = opts_mod.local_path_for(e)
+		local is_git_url = e.source:match("^https?://") or e.source:match("^git@")
+		local cmd
+		if is_git_url then
+			if vim.fn.isdirectory(path) == 0 then
+				cmd = { "git", "clone", "--filter=blob:none" }
+				if e.branch then
+					vim.list_extend(cmd, { "--branch", e.branch })
+				end
+				vim.list_extend(cmd, { e.source, path })
+			else
+				cmd = { "git", "-C", path, "pull", "--ff-only" }
+				if e.branch then
+					vim.list_extend(cmd, { "origin", e.branch })
+				end
+			end
+		elseif vim.fn.isdirectory(path .. "/.git") == 1 then
+			cmd = { "git", "-C", path, "pull", "--ff-only" }
+			if e.branch then
+				vim.list_extend(cmd, { "origin", e.branch })
+			end
+		end
+		if cmd then
+			jobs[#jobs + 1] = { name = e.name, cmd = cmd }
+		end
+	end
+
+	if #jobs == 0 then
+		on_done({})
+		return
+	end
+
+	vim.notify("[lazy-workspaces] syncing " .. #jobs .. " config(s)...", vim.log.levels.INFO)
+
+	local pending = #jobs
+	local failed = {}
+	for _, job in ipairs(jobs) do
+		local name_ref = job.name
+		vim.fn.jobstart(job.cmd, {
+			on_exit = function(_, code)
+				pending = pending - 1
+				if code ~= 0 then
+					failed[#failed + 1] = name_ref
+				end
+				if pending == 0 then
+					on_done(failed)
+				end
+			end,
+		})
+	end
+end
+
 --- Resolve workspace sources, scan plugin specs, schedule workspace setup() calls.
 --- Returns a flat list of lazy.nvim specs to pass to lazy.setup({ spec = ... }).
 ---@param opts LazyWorkspacesOpts
 ---@return table
 function M.collect(opts)
-	opts = opts or {}
+	opts = opts_mod.apply_defaults(opts)
 	local resolver = require("lazy-workspaces.resolver")
 	local state_mod = require("lazy-workspaces.state")
 	local specs = {}
 
-	-- Derive a human-readable config name from a source:
-	--   /tmp/nvim                     → /tmp/nvim  (local path, used as-is)
-	--   git@github.com:user/repo.git  → user/repo
-	--   https://github.com/user/repo  → user/repo
-	local function name_from_source(source)
-		local ssh_path = source:match("^git@[^:]+:(.+)$")
-		if ssh_path then
-			return ssh_path:gsub("%.git$", "")
-		end
-		if source:match("^https?://") then
-			local two_seg = source:match("([^/]+/[^/]+)$")
-			if two_seg then
-				return two_seg:gsub("%.git$", "")
-			end
-		end
-		return source
-	end
+	local entries = opts_mod.normalize(opts.configs or {})
+	local spec_dir_set = build_spec_dir_set(opts.specs)
 
-	-- Normalize configs to an ordered list of resolved configs
-	local normalized_configs = {}
-	local is_array = false
-	if opts.configs and opts.configs[1] ~= nil then
-		is_array = true
-	end
-
-	if is_array then
-		for i = 1, #opts.configs do
-			local v = opts.configs[i]
-			local name, source
-			if type(v) == "table" then
-				name = v.name or name_from_source(v.source)
-				source = v
-			else
-				name = name_from_source(v)
-				source = v
-			end
-			table.insert(normalized_configs, { name = name, value = source })
-		end
-	else
-		for k, v in pairs(opts.configs or {}) do
-			table.insert(normalized_configs, { name = k, value = v })
-		end
-	end
-
-	-- Pass 1: resolve each config URL → local path, scan workspace dirs on disk
-	local resolved = {} -- { cfg_name, path, ws_names[] }
-	local configs_map = {} -- { cfg_name = [ws_names] } for reconcile
+	---@type ResolvedConfig[]
+	local resolved = {}
+	local configs_map = {}
 	local seen_paths = {}
-
-	local spec_dir_set = {}
-	for _, s in ipairs(opts.specs or { "plugins" }) do
-		spec_dir_set[s] = true
-	end
-
 	_scan_cache = {}
 
-	for _, entry in ipairs(normalized_configs) do
-		local cfg_name = entry.name
-		local value = entry.value
-		local url, branch = parse_source(value)
-		local ok, path = pcall(resolver.resolve, url, branch)
+	for _, e in ipairs(entries) do
+		local ok, path = pcall(resolver.resolve, e.source, e.branch)
 		if not ok then
 			vim.notify(
 				"[lazy-workspaces] could not resolve config '"
-					.. cfg_name
+					.. e.name
 					.. "' ("
-					.. tostring(url)
+					.. tostring(e.source)
 					.. "): "
 					.. tostring(path),
 				vim.log.levels.ERROR
@@ -209,51 +245,38 @@ function M.collect(opts)
 				end
 			end
 
-			local classified = classify_dirs(scan_dir(path .. "/lua"), spec_dir_set)
-			_scan_cache[cfg_name] = {
-				path = path,
-				workspaces = classified.workspaces,
-				specs = classified.specs,
-			}
+			local classified = scan_config(path, spec_dir_set)
+			_scan_cache[e.name] = { path = path, workspaces = classified.workspaces, specs = classified.specs }
 
 			for _, ns in ipairs(classified.specs) do
 				if ns.via_init then
-					local chunk, load_err = loadfile(ns.path .. "/init.lua")
-					if not chunk then
-						vim.notify(
-							"[lazy-workspaces] failed to load spec " .. ns.path .. "/init.lua: " .. tostring(load_err),
-							vim.log.levels.WARN
-						)
-					else
-						local ok2, spec = pcall(chunk)
-						if ok2 and type(spec) == "table" then
-							specs[#specs + 1] = spec
-						end
+					local s = load_spec_file(ns.path .. "/init.lua", "spec " .. ns.path .. "/init.lua")
+					if s then
+						specs[#specs + 1] = s
 					end
 				else
 					for _, file in ipairs(vim.fn.glob(ns.path .. "/*.lua", false, true)) do
-						local chunk, load_err = loadfile(file)
-						if not chunk then
-							vim.notify(
-								"[lazy-workspaces] failed to load neighbor spec " .. init .. ": " .. tostring(load_err),
-								vim.log.levels.WARN
-							)
-						else
-							local ok2, spec = pcall(chunk)
-							if ok2 and type(spec) == "table" then
-								specs[#specs + 1] = spec
-							end
+						local s = load_spec_file(file, "neighbor spec " .. file)
+						if s then
+							specs[#specs + 1] = s
 						end
 					end
 				end
 			end
 
-			local ws_names = classified.workspaces
-			if #ws_names > 0 then
-				resolved[#resolved + 1] = { cfg_name = cfg_name, path = path, ws_names = ws_names }
-				configs_map[cfg_name] = ws_names
+			if #classified.workspaces > 0 then
+				resolved[#resolved + 1] = { name = e.name, path = path, workspaces = classified.workspaces }
+				configs_map[e.name] = classified.workspaces
 			end
 		end
+	end
+
+	if opts.auto_pull then
+		pull_all_async(entries, function(failed)
+			for _, name in ipairs(failed) do
+				vim.notify("[lazy-workspaces] auto-pull failed for '" .. name .. "'", vim.log.levels.WARN)
+			end
+		end)
 	end
 
 	-- Expose resolved config paths via vim.g.lw so workspace setup() calls can reference them.
@@ -261,42 +284,32 @@ function M.collect(opts)
 	-- vim.g.lw.config_paths → { local_path, ... }  (flat list, usable as dirs = vim.g.lw.config_paths)
 	local lw_configs = {}
 	local lw_config_paths = {}
-	for _, entry in ipairs(resolved) do
-		lw_configs[entry.cfg_name] = entry.path
-		lw_config_paths[#lw_config_paths + 1] = entry.path
+	for _, r in ipairs(resolved) do
+		lw_configs[r.name] = r.path
+		lw_config_paths[#lw_config_paths + 1] = r.path
 	end
 	vim.g.lw = { configs = lw_configs, config_paths = lw_config_paths }
 
-	-- Reconcile JSON state: auto-include new workspaces, respect excluded, warn stale
 	local effective = state_mod.reconcile(configs_map)
 
-	-- Pass 2: load plugin specs and schedule setup() for included workspaces only
-	for _, entry in ipairs(resolved) do
-		local cfg_effective = effective[entry.cfg_name] or {}
-		for _, ws_name in ipairs(entry.ws_names) do
+	for _, r in ipairs(resolved) do
+		local cfg_effective = effective[r.name] or {}
+		for _, ws_name in ipairs(r.workspaces) do
 			if cfg_effective[ws_name] then
-				local ws_root = entry.path .. "/lua/" .. ws_name
+				local ws_root = r.path .. "/lua/" .. ws_name
 				for _, spec_dir in ipairs(opts.specs or { "plugins" }) do
 					local dir = ws_root .. "/" .. spec_dir
 					if vim.fn.isdirectory(dir) == 1 then
 						for _, file in ipairs(vim.fn.glob(dir .. "/*.lua", false, true)) do
-							local chunk, err = loadfile(file)
-							if not chunk then
-								vim.notify(
-									"[lazy-workspaces] failed to load spec " .. file .. ": " .. tostring(err),
-									vim.log.levels.WARN
-								)
-							else
-								local ok2, spec = pcall(chunk)
-								if ok2 and type(spec) == "table" then
-									specs[#specs + 1] = spec
-								end
+							local s = load_spec_file(file, "spec " .. file)
+							if s then
+								specs[#specs + 1] = s
 							end
 						end
 					end
 				end
 
-				local ws_init = entry.path .. "/lua/" .. ws_name .. "/init.lua"
+				local ws_init = r.path .. "/lua/" .. ws_name .. "/init.lua"
 				vim.schedule(function()
 					if vim.fn.filereadable(ws_init) == 0 then
 						return
@@ -434,6 +447,58 @@ local function make_complete(want_val)
 	end
 end
 
+--- Pull all configs then reconcile state with any newly discovered workspaces.
+local function sync_configs()
+	if not _opts or not _opts.configs then
+		vim.notify("[lazy-workspaces] no configs configured", vim.log.levels.WARN)
+		return
+	end
+
+	local resolved_opts = opts_mod.apply_defaults(_opts)
+	local entries = opts_mod.normalize(resolved_opts.configs)
+	local spec_dir_set = build_spec_dir_set(resolved_opts.specs)
+
+	pull_all_async(entries, function(failed)
+		local state_mod = require("lazy-workspaces.state")
+		local configs_map = {}
+		for _, e in ipairs(entries) do
+			local path = opts_mod.local_path_for(e)
+			if vim.fn.isdirectory(path) == 1 then
+				local classified = scan_config(path, spec_dir_set)
+				if #classified.workspaces > 0 then
+					configs_map[e.name] = classified.workspaces
+				end
+			end
+		end
+
+		local before = state_mod.read()
+		state_mod.reconcile(configs_map)
+		local after = state_mod.read()
+
+		local new_ws = {}
+		for cfg, ws_map in pairs(after) do
+			for ws in pairs(ws_map) do
+				if not before[cfg] or before[cfg][ws] == nil then
+					new_ws[#new_ws + 1] = cfg .. "::" .. ws
+				end
+			end
+		end
+
+		if #failed > 0 then
+			vim.notify("[lazy-workspaces] pull failed: " .. table.concat(failed, ", "), vim.log.levels.ERROR)
+		end
+		if #new_ws > 0 then
+			vim.notify(
+				"[lazy-workspaces] new workspaces: " .. table.concat(new_ws, ", ") .. " — restart Neovim to apply",
+				vim.log.levels.INFO
+			)
+		else
+			local suffix = #failed > 0 and " (with errors)" or ""
+			vim.notify("[lazy-workspaces] synced" .. suffix .. " — no new workspaces", vim.log.levels.INFO)
+		end
+	end)
+end
+
 local function register_commands()
 	vim.api.nvim_create_user_command("LazyWorkspacesBootstrap", function(args)
 		require("lazy-workspaces.bootstrap").command(args)
@@ -454,6 +519,12 @@ local function register_commands()
 		desc = "Exclude a workspace (restart Neovim to apply)",
 		complete = make_complete(true),
 	})
+
+	vim.api.nvim_create_user_command(
+		"LazyWorkspacesSync",
+		sync_configs,
+		{ nargs = 0, desc = "Pull git configs and reconcile workspace state" }
+	)
 end
 
 --- Entry point. When called by user (before lazy.setup), bootstraps lazy.nvim, collects
