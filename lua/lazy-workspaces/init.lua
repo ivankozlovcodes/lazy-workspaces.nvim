@@ -17,7 +17,7 @@ local opts_mod = require("lazy-workspaces.opts")
 ---@field auto_pull boolean?  pull git configs and local .git repos on startup (default: true)
 
 ---@class LazyWorkspacesSetupOpts : LazyWorkspacesOpts
----@field lazy table?  opts forwarded verbatim to lazy.setup() (rocks, change_detection, etc.)
+---@field lazy LazyConfig?  opts forwarded verbatim to lazy.setup() (rocks, change_detection, etc.)
 
 ---@class ResolvedConfig
 ---@field name string        config name (key from opts.configs)
