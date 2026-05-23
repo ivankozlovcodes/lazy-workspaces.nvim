@@ -1,6 +1,6 @@
 local M = {}
 
-M.version = "0.1.4"
+M.version = "0.1.5"
 
 local _self_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
 local _opts = nil
@@ -307,29 +307,32 @@ function M.collect(opts)
 				end
 
 				local ws_init = r.path .. "/lua/" .. ws_name .. "/init.lua"
-				vim.schedule(function()
-					if vim.fn.filereadable(ws_init) == 0 then
-						return
-					end
+				if vim.fn.filereadable(ws_init) == 1 then
 					local chunk, load_err = loadfile(ws_init)
 					if not chunk then
 						vim.notify(
 							"[lazy-workspaces] failed to load workspace '" .. ws_name .. "': " .. tostring(load_err),
 							vim.log.levels.WARN
 						)
-						return
-					end
-					local ok3, mod = pcall(chunk)
-					if ok3 and type(mod) == "table" and type(mod.setup) == "function" then
-						local ok4, err = pcall(mod.setup)
-						if not ok4 then
-							vim.notify(
-								"[lazy-workspaces] workspace '" .. ws_name .. "' setup() error: " .. tostring(err),
-								vim.log.levels.ERROR
-							)
+					else
+						local ok3, mod = pcall(chunk)
+						if ok3 and type(mod) == "table" then
+							if type(mod.setup) == "function" then
+								vim.schedule(function()
+									local ok4, err = pcall(mod.setup)
+									if not ok4 then
+										vim.notify(
+											"[lazy-workspaces] workspace '" .. ws_name .. "' setup() error: " .. tostring(err),
+											vim.log.levels.ERROR
+										)
+									end
+								end)
+							else
+								specs[#specs + 1] = mod
+							end
 						end
 					end
-				end)
+				end
 			end
 		end
 	end

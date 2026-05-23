@@ -220,6 +220,28 @@ describe("collect()", function()
 
 	-- ── config load order ─────────────────────────────────────────────────
 
+	it("init.lua returning plain spec table is collected into specs", function()
+		with_state(function()
+			local tree = {
+				["lua/ws/init.lua"]        = "return { 'foo/bar' }",
+				["lua/ws/plugins/baz.lua"] = "return { 'baz/qux' }",
+			}
+			local root = H.make_tree(tree)
+			local specs = lw.collect({ configs = { cfg1 = { source = root } } })
+			H.cleanup(root)
+			assert.are.equal(2, #specs)
+		end)
+	end)
+
+	it("init.lua returning plain spec table without plugins/ dir yields one spec", function()
+		with_state(function()
+			local root = H.make_tree({ ["lua/ws/init.lua"] = "return { 'foo/bar' }" })
+			local specs = lw.collect({ configs = { cfg1 = { source = root } } })
+			H.cleanup(root)
+			assert.are.equal(1, #specs)
+		end)
+	end)
+
 	it("array-style configs run workspace setup() in declared order", function()
 		with_state(function()
 			local mk_init = function(val)

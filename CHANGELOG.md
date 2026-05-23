@@ -1,3 +1,20 @@
+## [0.2.1] - 2026-05-23
+
+### 🐛 Bug Fixes
+
+- *(collect)* Sync file loading, support plain spec return
+vim.schedule deferred loadfile unnecessarily — module wasn't
+  available when collect() returned, so specs were missed.
+
+  Plain table return from workspace init.lua now added directly
+  to specs instead of being silently ignored.
+
+
+
+### 🧪 Testing
+
+- *(collect)* Cover plain spec table return from init.lua
+
 ## [0.2.0] - 2026-05-20
 
 ### 🚀 Features
