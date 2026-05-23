@@ -22,7 +22,6 @@ function M.check()
 		return
 	end
 	h.ok("setup() called")
-	h.info("version: " .. (lw.version or "unknown"))
 
 	local state_mod = require("lazy-workspaces.state")
 	local json_path = state_mod.path()
@@ -41,6 +40,12 @@ function M.check()
 	local state = state_mod.read()
 	local spec_dirs = opts.specs or { "plugins" }
 	local spec_entries = {}
+	local collect_warnings = lw._get_collect_warnings()
+	local warnings_by_ws = {}
+	for _, w in ipairs(collect_warnings) do
+		warnings_by_ws[w.ws] = warnings_by_ws[w.ws] or {}
+		warnings_by_ws[w.ws][#warnings_by_ws[w.ws] + 1] = w
+	end
 
 	-- ── Configs ───────────────────────────────────────────────────────────────
 	for cfg_name, result in pairs(scan_cache) do
@@ -63,7 +68,16 @@ function M.check()
 			elseif not has_init then
 				h.warn(ws .. " — no init.lua")
 			else
-				h.info(fmt:format("OK", ws))
+				local ws_warns = warnings_by_ws[ws] or {}
+				if #ws_warns > 0 then
+					local dirs = {}
+					for _, w in ipairs(ws_warns) do
+						dirs[#dirs + 1] = "'" .. w.spec_dir .. "/' empty"
+					end
+					h.warn(fmt:format(ws, "— " .. table.concat(dirs, ", ")))
+				else
+					h.info(fmt:format("OK", ws))
+				end
 				for _, sd in ipairs(spec_dirs) do
 					local dir = result.path .. "/lua/" .. ws .. "/" .. sd
 					if vim.fn.isdirectory(dir) == 1 then

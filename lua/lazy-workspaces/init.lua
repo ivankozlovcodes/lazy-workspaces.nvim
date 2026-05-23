@@ -1,10 +1,11 @@
 local M = {}
 
-M.version = "0.1.5"
+M.version = "0.2.2"
 
 local _self_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
 local _opts = nil
 local _scan_cache = nil -- populated by collect(); { cfg_name = { path, workspaces, specs } }
+local _collect_warnings = {} -- { ws, spec_dir, loose_files[] } — reset each collect()
 local opts_mod = require("lazy-workspaces.opts")
 
 ---@class WorkspaceSource
@@ -90,6 +91,10 @@ end
 
 function M._get_scan_cache()
 	return _scan_cache
+end
+
+function M._get_collect_warnings()
+	return _collect_warnings
 end
 
 --- Compatibility: return workspace rel-paths under lua_dir (no spec dir exclusions).
@@ -221,6 +226,7 @@ function M.collect(opts)
 	local configs_map = {}
 	local seen_paths = {}
 	_scan_cache = {}
+	_collect_warnings = {}
 
 	for _, e in ipairs(entries) do
 		local ok, path = pcall(resolver.resolve, e.source, e.branch)
@@ -297,7 +303,15 @@ function M.collect(opts)
 				for _, spec_dir in ipairs(opts.specs or { "plugins" }) do
 					local dir = ws_root .. "/" .. spec_dir
 					if vim.fn.isdirectory(dir) == 1 then
-						for _, file in ipairs(vim.fn.glob(dir .. "/*.lua", false, true)) do
+						local lua_files = vim.fn.glob(dir .. "/*.lua", false, true)
+						if #lua_files == 0 then
+							_collect_warnings[#_collect_warnings + 1] = {
+								ws = ws_name,
+								spec_dir = spec_dir,
+								dir = dir,
+							}
+						end
+						for _, file in ipairs(lua_files) do
 							local s = load_spec_file(file, "spec " .. file)
 							if s then
 								specs[#specs + 1] = s
@@ -322,7 +336,10 @@ function M.collect(opts)
 									local ok4, err = pcall(mod.setup)
 									if not ok4 then
 										vim.notify(
-											"[lazy-workspaces] workspace '" .. ws_name .. "' setup() error: " .. tostring(err),
+											"[lazy-workspaces] workspace '"
+												.. ws_name
+												.. "' setup() error: "
+												.. tostring(err),
 											vim.log.levels.ERROR
 										)
 									end
@@ -335,6 +352,15 @@ function M.collect(opts)
 				end
 			end
 		end
+	end
+
+	if #_collect_warnings > 0 then
+		vim.schedule(function()
+			vim.notify(
+				"[lazy-workspaces] empty spec dir(s) detected — run :checkhealth lazy-workspaces for details",
+				vim.log.levels.WARN
+			)
+		end)
 	end
 
 	return specs
