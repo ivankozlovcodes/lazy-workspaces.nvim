@@ -205,6 +205,41 @@ describe("collect()", function()
 		end)
 	end)
 
+	-- ── empty spec dir warnings ───────────────────────────────────────────────
+
+	it("records warning when spec dir exists but has no .lua files", function()
+		with_state(function()
+			local tree = vim.tbl_extend("force", fx.simple.tree, {
+				["lua/" .. fx.simple.WS .. "/plugins/.keep"] = "",
+			})
+			local root = H.make_tree(tree)
+			lw.collect({ configs = { cfg1 = { source = root } } })
+			H.cleanup(root)
+			local warnings = lw._get_collect_warnings()
+			assert.are.equal(1, #warnings)
+			assert.are.equal(fx.simple.WS, warnings[1].ws)
+			assert.are.equal("plugins", warnings[1].spec_dir)
+		end)
+	end)
+
+	it("no warning when spec dir has .lua files", function()
+		with_state(function()
+			local root = H.make_tree(fx.with_plugins.tree)
+			lw.collect({ configs = { cfg1 = { source = root } } })
+			H.cleanup(root)
+			assert.are.equal(0, #lw._get_collect_warnings())
+		end)
+	end)
+
+	it("no warning when spec dir does not exist", function()
+		with_state(function()
+			local root = H.make_tree(fx.simple.tree)
+			lw.collect({ configs = { cfg1 = { source = root } } })
+			H.cleanup(root)
+			assert.are.equal(0, #lw._get_collect_warnings())
+		end)
+	end)
+
 	it("skips non-table return values from spec files silently", function()
 		with_state(function()
 			local tree = vim.tbl_extend("force", fx.simple.tree, {
