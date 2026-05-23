@@ -1,6 +1,6 @@
 local M = {}
 
-M.version = "0.1.5"
+M.version = "0.2.2"
 
 local _self_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
 local _opts = nil
@@ -336,7 +336,10 @@ function M.collect(opts)
 									local ok4, err = pcall(mod.setup)
 									if not ok4 then
 										vim.notify(
-											"[lazy-workspaces] workspace '" .. ws_name .. "' setup() error: " .. tostring(err),
+											"[lazy-workspaces] workspace '"
+												.. ws_name
+												.. "' setup() error: "
+												.. tostring(err),
 											vim.log.levels.ERROR
 										)
 									end

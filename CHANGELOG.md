@@ -1,3 +1,22 @@
+## [0.2.2] - 2026-05-23
+
+### 🚀 Features
+
+- *(init)* Give explicit warning in spec dir is empty
+User reported struggling with setting up new workspaces;
+  the issue was specs .lua script misplacement(next to
+  init.lua in root instead of in plugins/ folder).
+
+  Giving an explicit warning in health.
+
+  to feat
+
+
+
+### 🐛 Bug Fixes
+
+- Remove version duplicate in health
+
 ## [0.2.1] - 2026-05-23
 
 ### 🐛 Bug Fixes
