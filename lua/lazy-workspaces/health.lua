@@ -22,7 +22,6 @@ function M.check()
 		return
 	end
 	h.ok("setup() called")
-	h.info("version: " .. (lw.version or "unknown"))
 
 	local state_mod = require("lazy-workspaces.state")
 	local json_path = state_mod.path()
